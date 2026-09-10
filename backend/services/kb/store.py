@@ -219,6 +219,17 @@ class KBStore:
                 ],
             )
 
+    def load_chunk_texts(self, chunk_ids: list[int]) -> list[dict[str, Any]]:
+        if not chunk_ids:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, text FROM kb_chunk WHERE id IN (%s)"
+                % ",".join("?" * len(chunk_ids)),
+                chunk_ids,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def load_embeddings(self, chunk_ids: list[int]) -> dict[int, list[float]]:
         if not chunk_ids:
             return {}

@@ -155,3 +155,83 @@ def test_semantic_search_uses_vector_store_when_model_configured(setup_semantic_
     assert hits
     assert hits[0].path == "cache.md"
     assert hits[0].score > 0.8
+
+
+def test_indexer_embed_doc_chunks_writes_vectors(setup_semantic_kb, tmp_path, monkeypatch):
+    from services.kb import indexer
+    from services.kb.embeddings import OpenAICompatibleEmbedder
+
+    from core.config import get_config
+    monkeypatch.setattr(get_config(), "kb_semantic_model", "text-embedding-3-small", raising=False)
+
+    # Reindex creates doc+chunks first.
+    indexer.reindex()
+    doc_rows = indexer.list_docs()
+    assert doc_rows, "expected docs after reindex"
+
+    store = indexer._get_store()
+    doc_id = doc_rows[0]["id"]
+    chunk_ids = [r["id"] for r in store.get_chunk_rows(doc_id)]
+    assert chunk_ids
+
+    class FakeEmbedder:
+        def __init__(self, client, model):
+            pass
+
+        def embed_texts(self, texts):
+            return [[float(i + 1)] for i in range(len(texts))]
+
+    monkeypatch.setattr(OpenAICompatibleEmbedder, "__init__", FakeEmbedder.__init__)
+    monkeypatch.setattr(OpenAICompatibleEmbedder, "embed_texts", FakeEmbedder.embed_texts)
+
+    indexer.embed_doc_chunks(doc_id, chunk_ids)
+
+    vectors = store.load_embeddings(chunk_ids)
+    assert len(vectors) == len(chunk_ids)
+    assert all(len(v) == 1 for v in vectors.values())
+
+
+def test_indexer_embed_doc_chunks_degrades_on_embedder_error(setup_semantic_kb, tmp_path, monkeypatch):
+    from services.kb import indexer
+
+    from core.config import get_config
+    monkeypatch.setattr(get_config(), "kb_semantic_model", "text-embedding-3-small", raising=False)
+
+    indexer.reindex()
+    store = indexer._get_store()
+    doc_id = indexer.list_docs()[0]["id"]
+    chunk_ids = [r["id"] for r in store.get_chunk_rows(doc_id)]
+
+    class BrokenEmbedder:
+        def __init__(self, client, model):
+            pass
+
+        def embed_texts(self, texts):
+            raise RuntimeError("embedding down")
+
+    from services.kb.embeddings import OpenAICompatibleEmbedder
+    monkeypatch.setattr(OpenAICompatibleEmbedder, "__init__", BrokenEmbedder.__init__)
+    monkeypatch.setattr(OpenAICompatibleEmbedder, "embed_texts", BrokenEmbedder.embed_texts)
+
+    # Should not raise; caller treats semantic index as optional.
+    indexer.embed_doc_chunks(doc_id, chunk_ids)
+
+
+def test_reindex_auto_embeds_when_semantic_model_configured(setup_semantic_kb, monkeypatch):
+    from core.config import get_config
+    from services.kb import indexer
+
+    monkeypatch.setattr(get_config(), "kb_semantic_model", "text-embedding-3-small", raising=False)
+
+    # 新增一个文件，强制 reindex 走到 replace_chunks 分支
+    from core.config import get_config
+    from services.kb.indexer import resolve_path
+    kb_dir = Path(resolve_path(get_config().kb_dir))
+    (kb_dir / "new.md").write_text("# New notes\n\nRedis Cluster basics.", encoding="utf-8")
+
+    calls: list[tuple[int, list[int]]] = []
+    monkeypatch.setattr(indexer, "embed_doc_chunks", lambda doc_id, chunk_ids: calls.append((doc_id, chunk_ids)), raising=False)
+
+    indexer.reindex()
+
+    assert calls, "reindex should call embed_doc_chunks when semantic model is configured"

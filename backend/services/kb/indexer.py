@@ -121,6 +121,9 @@ def reindex() -> dict[str, Any]:
             )
             chunks = chunk_doc(raw, max_chars=cfg.kb_chunk_max_chars)
             store.replace_chunks(doc_id, chunks)
+            if str(getattr(cfg, "kb_semantic_model", "") or "").strip():
+                chunk_rows = store.get_chunk_rows(doc_id)
+                embed_doc_chunks(doc_id, [int(r["id"]) for r in chunk_rows])
             reindexed += 1
         except Exception as e:
             _log.warning("kb indexer 加载 %s 失败：%s", rel, e)
@@ -143,6 +146,34 @@ def reindex() -> dict[str, Any]:
     info = store.stats()
     info["reindexed_files"] = reindexed
     return info
+
+
+def embed_doc_chunks(doc_id: int, chunk_ids: list[int]) -> None:
+    """为指定 doc 的 chunks 生成并写入向量；不可用时静默降级。"""
+    cfg = get_config()
+    model = str(getattr(cfg, "kb_semantic_model", "") or "").strip()
+    if not model or not chunk_ids:
+        return
+
+    store = _get_store()
+    try:
+        rows = store.load_chunk_texts(chunk_ids)
+        if not rows:
+            return
+        from services.llm.streaming import get_client_for_model
+        from services.kb.embeddings import OpenAICompatibleEmbedder
+
+        embedder = OpenAICompatibleEmbedder(
+            client=get_client_for_model(cfg.get_review_model()),
+            model=model,
+        )
+        texts = [row["text"] for row in rows]
+        vectors = embedder.embed_texts(texts)
+        store.save_embeddings(
+            {int(row["id"]): vector for row, vector in zip(rows, vectors)}
+        )
+    except Exception as exc:  # pragma: no cover - semantic index is optional
+        _log.warning("kb indexer embedding skipped doc_id=%s: %s", doc_id, exc)
 
 
 def reindex_file(rel_path: str) -> dict[str, Any]:
