@@ -169,6 +169,58 @@ export interface ResumeUploadResult {
   parse_error?: string | null
 }
 
+export interface MockInterviewSession {
+  id: number
+  status: string
+  company: string
+  role: string
+  language: string
+  jd_snapshot?: string
+  resume_snapshot?: string
+  planned_question_count: number
+  question_count?: number
+  answered_question_count?: number
+  reviewed_question_count?: number
+  average_score?: number | null
+  report_markdown?: string | null
+  report_strengths?: string[]
+  report_weaknesses?: string[]
+  report_focus_areas?: string[]
+  report_generated_at?: number | null
+  questions?: MockInterviewQuestion[]
+}
+
+export interface MockInterviewFeedback {
+  overall_score: number | null
+  dimensions: { name: string; score: number; comment: string }[]
+  strengths: string[]
+  improvements: string[]
+  evidence: string[]
+  reference_answer: string | null
+}
+
+export interface MockInterviewQuestion {
+  id: number
+  session_id: number
+  seq: number
+  question_text: string
+  question_type: string
+  status: string
+  skill_tags: string[]
+  answer_text?: string | null
+  overall_score?: number | null
+  feedback?: MockInterviewFeedback | null
+}
+
+export interface MockInterviewCreateSessionInput {
+  company: string
+  role: string
+  language: string
+  jd_snapshot: string
+  resume_snapshot: string
+  planned_question_count: number
+}
+
 export const api = {
   getConfig: () => request('/api/config'),
   updateConfig: (data: Record<string, any>) =>
@@ -348,6 +400,38 @@ export const api = {
     request('/api/review/current'),
   reviewProfile: () =>
     request('/api/review/profile'),
+
+  // Mock interview
+  mockInterviewCreateSession: (data: MockInterviewCreateSessionInput) =>
+    request<MockInterviewSession>('/api/mock-interview/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  mockInterviewGenerateQuestion: (sessionId: number) =>
+    request<MockInterviewQuestion>(`/api/mock-interview/sessions/${sessionId}/questions`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  mockInterviewSubmitAnswer: (questionId: number, answerText: string) =>
+    request<MockInterviewQuestion>(`/api/mock-interview/questions/${questionId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify({ answer_text: answerText }),
+    }),
+  mockInterviewGenerateFeedback: (questionId: number) =>
+    request<MockInterviewQuestion>(`/api/mock-interview/questions/${questionId}/feedback`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  mockInterviewFinishSession: (sessionId: number) =>
+    request<{ ok: boolean; status: string }>(`/api/mock-interview/sessions/${sessionId}/finish`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  mockInterviewGenerateReport: (sessionId: number) =>
+    request<MockInterviewSession>(`/api/mock-interview/sessions/${sessionId}/report`, {
+      method: 'POST',
+      body: '{}',
+    }),
 
   // Resume optimizer
   resumeOptimize: (jd: string) =>

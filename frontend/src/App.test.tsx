@@ -40,6 +40,7 @@ vi.mock('@/components/SettingsDrawer', () => ({ default: () => null }))
 vi.mock('@/components/KnowledgeMap', () => ({ default: () => <div>knowledge</div> }))
 vi.mock('@/components/ResumeOptimizer', () => ({ default: () => <div>resume</div> }))
 vi.mock('@/components/JobTracker', () => ({ default: () => <div>jobs</div> }))
+vi.mock('@/components/MockInterview', () => ({ default: () => <div>mock interview</div> }))
 
 
 describe('App bootstrap', () => {
@@ -385,5 +386,38 @@ describe('Window control buttons', () => {
 
     expect(quitSpy).toHaveBeenCalledTimes(1)
     expect(minimizeSpy).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('App mock interview navigation', () => {
+  it('renders the mock interview module and navigation tab', async () => {
+    apiMock.getConfig.mockResolvedValue({
+      models: [{ name: 'demo', supports_vision: false }],
+      active_model: 0,
+      api_key_set: true,
+      think_mode: false,
+      think_effort: 'off',
+      stt_provider: 'whisper',
+    })
+    apiMock.getDevices.mockResolvedValue({ devices: [], platform: null })
+    apiMock.getOptions.mockResolvedValue({ positions: [], languages: [] })
+    apiMock.checkModelsHealth.mockResolvedValue(undefined)
+    apiMock.kbStatus.mockResolvedValue({
+      enabled: false,
+      total_docs: 0,
+      total_chunks: 0,
+      deadline_ms: 150,
+      asr_deadline_ms: 80,
+      deps: { docx: false, pdf: false, ocr: false, vision: false },
+    })
+    useUiPrefsStore.setState({ appMode: 'mock-interview' as any })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('mock interview')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('tab', { name: '模拟面试' })).toBeInTheDocument()
   })
 })

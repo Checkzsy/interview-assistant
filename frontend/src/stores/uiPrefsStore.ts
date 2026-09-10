@@ -23,7 +23,7 @@ const ASSIST_SPLIT_KEY = 'ia_assist_split_pct'
 const ASSIST_TRANSCRIPT_COLLAPSED_KEY = 'ia_assist_transcript_collapsed'
 const APP_MODE_KEY = 'ia_app_mode'
 
-export type AppMode = 'assist' | 'review' | 'knowledge' | 'resume-opt' | 'job-tracker'
+export type AppMode = 'assist' | 'review' | 'mock-interview' | 'knowledge' | 'resume-opt' | 'job-tracker'
 export type JobTrackerDeepLink = {
   applicationId: number
   openReviews?: boolean
@@ -47,6 +47,7 @@ export const __UI_PREFS_TEST_KEYS = {
 const APP_MODE_VALUES: ReadonlySet<AppMode> = new Set([
   'assist',
   'review',
+  'mock-interview',
   'knowledge',
   'resume-opt',
   'job-tracker',

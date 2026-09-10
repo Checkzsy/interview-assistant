@@ -24,7 +24,7 @@ from core.env import env_int
 from core.logger import setup_logging, get_logger
 from services.stt import get_stt_engine
 from api.realtime import ws
-from api import common, assist, analytics, resume, jobs, review
+from api import common, assist, analytics, resume, jobs, review, mock_interview
 from api import kb as kb_api
 
 setup_logging()
@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
         cfg.stt_provider, cfg.position, cfg.language,
         models_summary, cfg.temperature, cfg.max_tokens, cfg.think_mode,
     )
+
+    mock_interview.init_db()
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=_BQ_SIZE)
@@ -242,6 +244,7 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
+app.include_router(mock_interview.router, prefix="/api")
 app.include_router(kb_api.router, prefix="/api")
 
 

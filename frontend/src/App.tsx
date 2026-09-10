@@ -21,6 +21,7 @@ import { AppToastStack } from '@/components/app/AppToastStack'
 import { InitErrorScreen } from '@/components/app/InitErrorScreen'
 import { ModelPriorityDropdown } from '@/components/app/ModelPriorityDropdown'
 const ReviewMode = lazy(() => import('@/components/ReviewMode'))
+const MockInterview = lazy(() => import('@/components/MockInterview'))
 const KnowledgeMap = lazy(() => import('@/components/KnowledgeMap'))
 const ResumeOptimizer = lazy(() => import('@/components/ResumeOptimizer'))
 const JobTracker = lazy(() => import('@/components/JobTracker'))
@@ -28,6 +29,7 @@ const JobTracker = lazy(() => import('@/components/JobTracker'))
 const APP_MODE_TABS = [
   ['assist', '实时辅助'],
   ['review', '面试复盘'],
+  ['mock-interview', '模拟面试'],
   ['knowledge', '能力分析'],
   ['resume-opt', '简历优化'],
   ['job-tracker', '求职看板'],
@@ -591,6 +593,13 @@ export default function App() {
       {appMode === 'review' && (
         <Suspense fallback={<div className="flex-1 flex items-center justify-center text-sm text-text-muted">加载面试复盘中…</div>}>
           <ReviewMode />
+        </Suspense>
+      )}
+
+      {/* ── Mock Interview ── */}
+      {appMode === 'mock-interview' && (
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center text-sm text-text-muted">加载模拟面试中…</div>}>
+          <MockInterview />
         </Suspense>
       )}
 
