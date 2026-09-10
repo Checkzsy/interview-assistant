@@ -13,7 +13,8 @@ def backend_root() -> str:
 
 
 def data_dir() -> str:
-    d = os.path.join(_BACKEND_ROOT, "data")
+    override = os.environ.get("IA_DATA_DIR", "").strip()
+    d = override or os.path.join(_BACKEND_ROOT, "data")
     os.makedirs(d, exist_ok=True)
     return d
 

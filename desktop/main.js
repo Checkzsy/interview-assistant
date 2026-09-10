@@ -52,6 +52,7 @@ const {
   relayChildOutput,
 } = require('./windowOptions');
 const { createMultiScreenBatch } = require('./multiScreenBatch');
+const { buildBackendEnvironment, resolveRuntimePaths } = require('./runtimePaths');
 
 const pkg = require('./package.json');
 
@@ -77,8 +78,13 @@ function loadAppDisplayName() {
 
 const APP_DISPLAY_NAME = loadAppDisplayName();
 
-const ROOT = path.resolve(__dirname, '..');
-const BACKEND_DIR = path.join(ROOT, 'backend');
+const RUNTIME_PATHS = resolveRuntimePaths({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appDataPath: app.getPath('userData'),
+});
+const ROOT = RUNTIME_PATHS.root;
+const BACKEND_DIR = RUNTIME_PATHS.backendDir;
 const PORT = parseInt(process.env.PORT || '18080', 10);
 const SERVER_URL = `http://127.0.0.1:${PORT}`;
 
@@ -310,14 +316,14 @@ function waitForServer(timeout = 40000) {
 function startPythonBackend() {
   const python = process.platform === 'win32' ? 'python' : 'python3';
   pythonProcess = spawn(python, [
-    path.join(ROOT, 'start.py'),
+    RUNTIME_PATHS.startScript,
     '--mode', 'network',
     '--no-build',
     '--port', String(PORT),
   ], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: buildBackendEnvironment(RUNTIME_PATHS, process.env),
     windowsHide: true,
   });
 

@@ -196,6 +196,33 @@ python start.py --mode network  # 浏览器模式，默认 http://localhost:1808
 - `python quick-start.py` 适合已经构建过前端、想快速打开桌面模式的场景。
 - 只想在浏览器里体验时，可直接用 `--mode network`。
 
+## 打包 Windows 安装包
+
+```bash
+cd frontend
+npm ci
+npm run build
+
+cd ../desktop
+npm ci
+npm run dist
+```
+
+输出文件：
+
+```text
+desktop/dist/Interview Assistant Setup 1.0.0.exe
+```
+
+当前打包边界：
+
+- 使用 electron-builder / NSIS，默认 per-user 安装。
+- Electron 壳、前端 `dist`、后端源码和 `start.py` 会进入安装包。
+- 运行时数据与配置写入 Electron `userData` 目录，不写入安装目录。
+- 尚未内置 Python 运行时；目标机器需要 Python `3.10+`，首次启动会安装后端依赖。
+- 安装包未做 Authenticode 签名，Windows SmartScreen 可能提示风险。
+- 若只需验证目录布局，可在 `desktop/` 执行 `npm run dist:dir`。
+
 ## 开发与自测
 
 ```bash
