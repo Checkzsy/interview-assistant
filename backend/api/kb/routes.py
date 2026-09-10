@@ -67,6 +67,7 @@ async def kb_status() -> dict:
         "asr_deadline_ms": int(getattr(cfg, "kb_asr_deadline_ms", 80) or 80),
         "semantic_enabled": bool(getattr(cfg, "kb_semantic_enabled", False)),
         "semantic_top_k": int(getattr(cfg, "kb_semantic_top_k", 4) or 4),
+        "semantic_model": str(getattr(cfg, "kb_semantic_model", "") or ""),
         "deps": deps,
         **s,
     }

@@ -215,6 +215,7 @@ class AppConfig(BaseModel):
     kb_semantic_enabled: bool = False
     kb_semantic_top_k: int = 4
     kb_semantic_deadline_ms: int = 200
+    kb_semantic_model: str = ""
 
     # --- Review (面试复盘) ---
     review_enabled: bool = False

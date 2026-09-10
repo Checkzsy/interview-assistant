@@ -103,3 +103,55 @@ def test_status_exposes_semantic_fields(monkeypatch):
 
     assert payload["semantic_enabled"] is True
     assert payload["semantic_top_k"] == 6
+
+
+def test_semantic_search_without_model_returns_empty(monkeypatch):
+    from core.config import get_config
+    from services.kb import retriever
+
+    monkeypatch.setattr(get_config(), "kb_semantic_model", "", raising=False)
+    assert retriever._semantic_search("anything", 4) == []
+
+
+def test_semantic_search_uses_vector_store_when_model_configured(setup_semantic_kb, monkeypatch):
+    from core.config import get_config
+    from services.kb import retriever
+
+    monkeypatch.setattr(get_config(), "kb_semantic_model", "text-embedding-3-small", raising=False)
+    monkeypatch.setattr(get_config(), "kb_semantic_enabled", True, raising=False)
+
+    semantic_hit = _hit("cache.md", "Bloom filters reduce cache penetration.")
+
+    class FakeEmbedder:
+        def __init__(self, client, model):
+            self.client = client
+            self.model = model
+
+        def embed_texts(self, texts):
+            return [[1.0, 0.0]]
+
+    class FakeStore:
+        def semantic_search_by_vector(self, vector, limit):
+            return [
+                {
+                    "path": semantic_hit.path,
+                    "section_path": semantic_hit.section_path,
+                    "text": semantic_hit.text,
+                    "score": 0.9,
+                    "page": None,
+                    "origin": "text",
+                }
+            ]
+
+    monkeypatch.setattr("services.kb.embeddings.OpenAICompatibleEmbedder", FakeEmbedder)
+    monkeypatch.setattr(retriever, "_get_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "services.llm.streaming.get_client_for_model",
+        lambda model: object(),
+        raising=False,
+    )
+
+    hits = retriever._semantic_search("cache penetration", 4)
+    assert hits
+    assert hits[0].path == "cache.md"
+    assert hits[0].score > 0.8

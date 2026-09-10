@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -48,6 +49,11 @@ CREATE TABLE IF NOT EXISTS kb_attachment (
   kind     TEXT NOT NULL,
   mime     TEXT NOT NULL,
   path     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS kb_chunk_embedding (
+  chunk_id    INTEGER PRIMARY KEY REFERENCES kb_chunk(id) ON DELETE CASCADE,
+  vector_json TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(
@@ -172,6 +178,10 @@ class KBStore:
                     "DELETE FROM kb_fts WHERE rowid=?",
                     [(cid,) for cid in old_ids],
                 )
+                conn.executemany(
+                    "DELETE FROM kb_chunk_embedding WHERE chunk_id=?",
+                    [(cid,) for cid in old_ids],
+                )
             conn.execute("DELETE FROM kb_chunk WHERE doc_id=?", (doc_id,))
             for c in chunks_list:
                 cur = conn.execute(
@@ -187,6 +197,87 @@ class KBStore:
                     "INSERT INTO kb_fts(rowid, chunk_text) VALUES(?, ?)",
                     (chunk_id, fts_text),
                 )
+
+    def get_chunk_rows(self, doc_id: int) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM kb_chunk WHERE doc_id=? ORDER BY ord", (doc_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_embeddings(self, vectors_by_chunk: dict[int, list[float]]) -> None:
+        with self._lock, self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO kb_chunk_embedding(chunk_id, vector_json)
+                VALUES(?, ?)
+                ON CONFLICT(chunk_id) DO UPDATE SET vector_json=excluded.vector_json
+                """,
+                [
+                    (chunk_id, json.dumps(vector, ensure_ascii=False))
+                    for chunk_id, vector in vectors_by_chunk.items()
+                ],
+            )
+
+    def load_embeddings(self, chunk_ids: list[int]) -> dict[int, list[float]]:
+        if not chunk_ids:
+            return {}
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT chunk_id, vector_json FROM kb_chunk_embedding WHERE chunk_id IN (%s)"
+                % ",".join("?" * len(chunk_ids)),
+                chunk_ids,
+            ).fetchall()
+        out: dict[int, list[float]] = {}
+        for r in rows:
+            try:
+                parsed = json.loads(r["vector_json"])
+                out[int(r["chunk_id"])] = parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                out[int(r["chunk_id"])] = []
+        return out
+
+    def semantic_search_by_vector(
+        self, vector: list[float], limit: int
+    ) -> list[dict[str, Any]]:
+        import math
+
+        q = list(vector)
+        q_norm = math.sqrt(sum(v * v for v in q)) or 1.0
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.chunk_id AS id, e.vector_json, d.path, c.section_path, c.text, c.page, c.origin
+                FROM kb_chunk_embedding e
+                JOIN kb_chunk c ON c.id = e.chunk_id
+                JOIN kb_doc d ON d.id = c.doc_id
+                """
+            ).fetchall()
+
+        scored: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                vec = json.loads(r["vector_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not vec:
+                continue
+            dot = sum(a * b for a, b in zip(q, vec))
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            score = dot / (q_norm * norm)
+            scored.append(
+                {
+                    "id": int(r["id"]),
+                    "path": r["path"],
+                    "section_path": r["section_path"] or "",
+                    "text": r["text"],
+                    "score": score,
+                    "page": r["page"],
+                    "origin": r["origin"] or "text",
+                }
+            )
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return scored[:limit]
 
     def fts_search(
         self,

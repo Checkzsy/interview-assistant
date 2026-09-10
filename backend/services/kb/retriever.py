@@ -32,11 +32,42 @@ def reset() -> None:
 
 
 def _semantic_search(query: str, k: int) -> list[KBHit]:
-    """可选语义检索 seam。默认返回空；生产可替换为向量/Embedding 实现。
+    """可选语义检索。使用 OpenAI-compatible Embedding + 本地向量余弦检索。
 
-    保持与 BM25 返回相同的 ``KBHit`` 契约，便于 RRF 融合与上层统一消费。
+    失败或未配置时返回空列表，调用方会降级到纯 BM25，不影响主流程。
     """
-    return []
+    cfg = get_config()
+    model = str(getattr(cfg, "kb_semantic_model", "") or "").strip()
+    if not model:
+        return []
+
+    try:
+        from services.llm.streaming import get_client_for_model
+        from services.kb.embeddings import OpenAICompatibleEmbedder
+
+        client = get_client_for_model(cfg.get_review_model())
+        embedder = OpenAICompatibleEmbedder(client=client, model=model)
+        vectors = embedder.embed_texts([query])
+        if not vectors:
+            return []
+        store = _get_store()
+        rows = store.semantic_search_by_vector(vectors[0], limit=k)
+        hits: list[KBHit] = []
+        for r in rows:
+            hits.append(
+                KBHit(
+                    path=r["path"],
+                    section_path=r.get("section_path") or "",
+                    text=r["text"],
+                    score=float(r.get("score") or 0.0),
+                    page=r.get("page"),
+                    origin=r.get("origin") or "text",
+                )
+            )
+        return hits
+    except Exception as exc:  # pragma: no cover - defensive degradation
+        _log.warning("kb semantic search unavailable q=%r: %s", query, exc)
+        return []
 
 
 def _rrf_fuse(lists: list[list[KBHit]], k: int, constant: int = 60) -> list[KBHit]:
