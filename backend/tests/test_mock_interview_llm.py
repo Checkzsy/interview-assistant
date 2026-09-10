@@ -229,3 +229,58 @@ def test_required_llm_text_rejects_whitespace_only_values():
                 "focus_areas": [],
             },
         )
+
+
+def test_generate_question_prompt_prioritizes_practice_focus_areas():
+    prompts: list[str] = []
+
+    def fake_chat(prompt: str):
+        prompts.append(prompt)
+        return {
+            "question_text": "请对比 Redis RDB 与 AOF 的恢复流程和取舍。",
+            "question_type": "technical",
+            "skill_tags": ["Redis", "持久化"],
+        }
+
+    mock_interview_llm.generate_question(
+        session={
+            "role": "后端开发",
+            "language": "中文",
+            "jd_snapshot": "",
+            "resume_snapshot": "",
+            "focus_areas": ["Redis 持久化与恢复", "缓存场景取舍"],
+        },
+        chat_json=fake_chat,
+    )
+
+    assert "弱项复练重点" in prompts[0]
+    assert "Redis 持久化与恢复" in prompts[0]
+    assert "缓存场景取舍" in prompts[0]
+    assert "本题必须围绕“本题弱项复练重点”出题" in prompts[0]
+
+
+def test_generate_question_prompt_rotates_practice_focus_area_by_seq():
+    prompts: list[str] = []
+
+    def fake_chat(prompt: str):
+        prompts.append(prompt)
+        return {
+            "question_text": "练习题",
+            "question_type": "technical",
+            "skill_tags": [],
+        }
+
+    session = {
+        "role": "后端开发",
+        "language": "中文",
+        "focus_areas": ["Redis 持久化与恢复", "缓存场景取舍"],
+    }
+    mock_interview_llm.generate_question(session=session, chat_json=fake_chat)
+    mock_interview_llm.generate_question(
+        session=session,
+        previous_questions=[{"seq": 1, "question_text": "第一题"}],
+        chat_json=fake_chat,
+    )
+
+    assert "本题弱项复练重点：Redis 持久化与恢复" in prompts[0]
+    assert "本题弱项复练重点：缓存场景取舍" in prompts[1]

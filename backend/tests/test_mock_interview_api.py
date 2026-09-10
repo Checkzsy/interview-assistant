@@ -201,3 +201,57 @@ def test_generate_session_report_rejects_unfinished_session(tmp_path, monkeypatc
 
     assert res.status_code == 409
     assert "未完成" in res.json()["detail"]
+
+
+def test_practice_session_endpoint_creates_child_from_completed_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    parent = mock_interview.create_session(
+        company="ACME",
+        role="后端开发",
+        language="中文",
+        jd_snapshot="负责高并发服务",
+        resume_snapshot="做过订单查询优化",
+        planned_question_count=1,
+    )
+    question = mock_interview.add_question(session_id=parent["id"], seq=1, question_text="Redis 持久化有哪些方式？")
+    mock_interview.submit_answer(question_id=question["id"], answer_text="RDB 和 AOF。")
+    mock_interview.save_feedback(
+        question_id=question["id"],
+        overall_score=7,
+        dimensions=[{"name": "事实正确性", "score": 7, "comment": "答到两类方式"}],
+        strengths=["覆盖基础概念"],
+        improvements=["补充混合持久化和取舍"],
+        evidence=[],
+        reference_answer="RDB、AOF 与混合持久化。",
+    )
+    assert mock_interview.finish_session(parent["id"])
+    mock_interview.save_session_report(
+        session_id=parent["id"],
+        summary_markdown="## 整场总结\n基础概念覆盖较好，但需要补足持久化取舍。",
+        strengths=["基础概念覆盖较好"],
+        weaknesses=["持久化取舍表达不足"],
+        focus_areas=["Redis 持久化与恢复", "缓存场景取舍"],
+    )
+
+    with _client() as client:
+        res = client.post(f"/api/mock-interview/sessions/{parent['id']}/practice")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["parent_session_id"] == parent["id"]
+    assert data["status"] == "created"
+    assert data["planned_question_count"] == 2
+    assert data["focus_areas"] == ["Redis 持久化与恢复", "缓存场景取舍"]
+
+
+def test_practice_session_endpoint_rejects_unfinished_parent(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    parent = mock_interview.create_session(role="后端开发", planned_question_count=1)
+
+    with _client() as client:
+        res = client.post(f"/api/mock-interview/sessions/{parent['id']}/practice")
+
+    assert res.status_code == 409
+    assert "已完成且已生成报告" in res.json()["detail"]

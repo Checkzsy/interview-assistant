@@ -11,6 +11,7 @@ const apiMock = vi.hoisted(() => ({
   mockInterviewGenerateReport: vi.fn(),
   mockInterviewSessions: vi.fn(),
   mockInterviewSession: vi.fn(),
+  mockInterviewCreatePracticeSession: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -74,6 +75,20 @@ describe('MockInterview', () => {
       },
     })
     apiMock.mockInterviewFinishSession.mockResolvedValue({ ok: true, status: 'completed' })
+    apiMock.mockInterviewCreatePracticeSession.mockResolvedValue({
+      id: 12,
+      parent_session_id: 7,
+      status: 'created',
+      company: 'ACME',
+      role: '后端开发',
+      language: '中文',
+      planned_question_count: 2,
+      question_count: 0,
+      answered_question_count: 0,
+      reviewed_question_count: 0,
+      average_score: null,
+      focus_areas: ['Redis 持久化与恢复', '缓存场景取舍'],
+    })
     apiMock.mockInterviewGenerateReport.mockResolvedValue({
       id: 7,
       status: 'completed',
@@ -150,6 +165,34 @@ describe('MockInterview', () => {
     expect(screen.getAllByText(/基础概念覆盖较好/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/持久化取舍表达不足/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Redis 持久化与恢复/).length).toBeGreaterThan(0)
+
+    let resolvePractice!: (value: any) => void
+    apiMock.mockInterviewCreatePracticeSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePractice = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '开始弱项复练' }))
+    expect(screen.getByRole('button', { name: '开始模拟面试' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成整场报告' })).toBeDisabled()
+    resolvePractice({
+      id: 12,
+      parent_session_id: 7,
+      status: 'created',
+      company: 'ACME',
+      role: '后端开发',
+      language: '中文',
+      planned_question_count: 2,
+      question_count: 0,
+      answered_question_count: 0,
+      reviewed_question_count: 0,
+      average_score: null,
+      focus_areas: ['Redis 持久化与恢复', '缓存场景取舍'],
+    })
+    await waitFor(() => expect(apiMock.mockInterviewCreatePracticeSession).toHaveBeenCalledWith(7))
+    await waitFor(() => expect(screen.getByText('弱项复练会话已创建')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '生成下一题' })).toBeEnabled()
   })
 
   it('shows an actionable create error and keeps the form ready for retry', async () => {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import sys
 from pathlib import Path
 
@@ -238,3 +240,91 @@ def test_finish_session_requires_planned_question_count(tmp_path, monkeypatch):
         reference_answer="布隆过滤器、空值缓存与接口限流。",
     )
     assert mock_interview.finish_session(session["id"]) is True
+
+
+def test_create_practice_session_from_completed_parent_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    parent = mock_interview.create_session(
+        company="ACME",
+        role="后端开发",
+        language="中文",
+        jd_snapshot="负责高并发服务",
+        resume_snapshot="做过订单查询优化",
+        planned_question_count=1,
+    )
+    question = mock_interview.add_question(session_id=parent["id"], seq=1, question_text="Redis 持久化有哪些方式？")
+    mock_interview.submit_answer(question_id=question["id"], answer_text="RDB 和 AOF。")
+    mock_interview.save_feedback(
+        question_id=question["id"],
+        overall_score=7,
+        dimensions=[{"name": "事实正确性", "score": 7, "comment": "答到两类方式"}],
+        strengths=["覆盖基础概念"],
+        improvements=["补充混合持久化和取舍"],
+        evidence=[],
+        reference_answer="RDB、AOF 与混合持久化。",
+    )
+    assert mock_interview.finish_session(parent["id"])
+    mock_interview.save_session_report(
+        session_id=parent["id"],
+        summary_markdown="## 整场总结\n基础概念覆盖较好，但需要补足持久化取舍。",
+        strengths=["基础概念覆盖较好"],
+        weaknesses=["持久化取舍表达不足"],
+        focus_areas=["Redis 持久化与恢复", "缓存场景取舍"],
+    )
+
+    practice = mock_interview.create_practice_session(parent_session_id=parent["id"])
+
+    assert practice["id"] != parent["id"]
+    assert practice["parent_session_id"] == parent["id"]
+    assert practice["status"] == "created"
+    assert practice["company"] == "ACME"
+    assert practice["role"] == "后端开发"
+    assert practice["language"] == "中文"
+    assert practice["jd_snapshot"] == "负责高并发服务"
+    assert practice["resume_snapshot"] == "做过订单查询优化"
+    assert practice["planned_question_count"] == 2
+    assert practice["focus_areas"] == ["Redis 持久化与恢复", "缓存场景取舍"]
+    assert practice["question_count"] == 0
+
+
+def test_create_practice_session_requires_completed_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    parent = mock_interview.create_session(role="后端开发", planned_question_count=1)
+
+    with pytest.raises(ValueError, match="已完成且已生成报告"):
+        mock_interview.create_practice_session(parent_session_id=parent["id"])
+
+
+def test_create_practice_session_normalizes_and_caps_focus_areas(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    parent = mock_interview.create_session(role="后端开发", planned_question_count=1)
+    question = mock_interview.add_question(session_id=parent["id"], seq=1, question_text="综合技术题")
+    mock_interview.submit_answer(question_id=question["id"], answer_text="回答")
+    mock_interview.save_feedback(
+        question_id=question["id"],
+        overall_score=6,
+        dimensions=[{"name": "事实正确性", "score": 6, "comment": "需要复练"}],
+        strengths=[],
+        improvements=[],
+        evidence=[],
+        reference_answer="参考",
+    )
+    assert mock_interview.finish_session(parent["id"])
+    focus_areas = [f"重点-{i}" for i in range(51)] + ["重点-0"]
+    mock_interview.save_session_report(
+        session_id=parent["id"],
+        summary_markdown="## 总结",
+        strengths=[],
+        weaknesses=[],
+        focus_areas=focus_areas,
+    )
+
+    practice = mock_interview.create_practice_session(parent_session_id=parent["id"])
+
+    assert practice["planned_question_count"] == 50
+    assert len(practice["focus_areas"]) == 50
+    assert len(set(practice["focus_areas"])) == 50
+    assert practice["focus_areas"][0] == "重点-0"

@@ -178,6 +178,8 @@ export interface MockInterviewSession {
   jd_snapshot?: string
   resume_snapshot?: string
   planned_question_count: number
+  parent_session_id?: number | null
+  focus_areas?: string[]
   question_count?: number
   answered_question_count?: number
   reviewed_question_count?: number
@@ -433,6 +435,11 @@ export const api = {
     }),
   mockInterviewGenerateReport: (sessionId: number) =>
     request<MockInterviewSession>(`/api/mock-interview/sessions/${sessionId}/report`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  mockInterviewCreatePracticeSession: (sessionId: number) =>
+    request<MockInterviewSession>(`/api/mock-interview/sessions/${sessionId}/practice`, {
       method: 'POST',
       body: '{}',
     }),

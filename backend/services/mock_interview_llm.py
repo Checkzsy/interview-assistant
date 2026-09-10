@@ -91,6 +91,14 @@ def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str,
         else:
             previous_lines.append(f"{seq}. \u95ee\u9898\uff1a{question}")
     previous_text = "\n".join(previous_lines) or "\uff08\u672c\u573a\u8fd8\u6ca1\u6709\u9898\u76ee\uff09"
+    focus_areas = [str(item).strip() for item in session.get("focus_areas") or [] if str(item).strip()]
+    focus_text = "\n".join(f"- {item}" for item in focus_areas) or "\uff08\u65e0\uff09"
+    target_focus_area = (
+        focus_areas[len(previous_questions) % len(focus_areas)]
+        if focus_areas
+        else None
+    )
+    target_focus_text = target_focus_area or "\uff08\u65e0\uff09"
     return f"""你是一名严谨的{session.get('language') or '中文'}技术面试官，正在面试{session.get('company') or '未提供公司'}的{session.get('role') or '未提供岗位'}候选人。
 
 岗位描述快照：
@@ -99,6 +107,11 @@ def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str,
 简历快照：
 {session.get('resume_snapshot') or '（未提供）'}
 
+弱项复练重点：
+{focus_text}
+
+本题弱项复练重点：{target_focus_text}
+
 已提问：
 {previous_text}
 
@@ -106,7 +119,7 @@ def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str,
 1. 题目必须贴合岗位描述和候选人真实经历。
 2. 不得编造简历中不存在的经历。
 3. 不要重复已提问。
-4. 优先考察岗位关键能力、项目细节或技术取舍。
+4. 如存在弱项复练重点，本题必须围绕“本题弱项复练重点”出题；否则考察岗位关键能力、项目细节或技术取舍。
 5. 只返回 JSON，不输出解释。
 
 JSON 格式：

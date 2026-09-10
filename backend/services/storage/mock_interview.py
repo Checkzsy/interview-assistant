@@ -49,6 +49,8 @@ def init_db() -> None:
                     jd_snapshot TEXT NOT NULL DEFAULT '',
                     resume_snapshot TEXT NOT NULL DEFAULT '',
                     planned_question_count INTEGER NOT NULL DEFAULT 5,
+                    parent_session_id INTEGER,
+                    focus_areas_json TEXT,
                     report_markdown TEXT,
                     report_strengths_json TEXT,
                     report_weaknesses_json TEXT,
@@ -87,6 +89,8 @@ def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_mock_questions_session ON mock_interview_questions(session_id, seq)"
             )
             for column, definition in (
+                ("parent_session_id", "INTEGER"),
+                ("focus_areas_json", "TEXT"),
                 ("report_markdown", "TEXT"),
                 ("report_strengths_json", "TEXT"),
                 ("report_weaknesses_json", "TEXT"),
@@ -210,6 +214,8 @@ def create_session(
     jd_snapshot: str = "",
     resume_snapshot: str = "",
     planned_question_count: int = 5,
+    parent_session_id: Optional[int] = None,
+    focus_areas: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     now = time.time()
     with _db_lock:
@@ -219,8 +225,9 @@ def create_session(
                 """
                 INSERT INTO mock_interview_sessions (
                     status, company, role, language, jd_snapshot, resume_snapshot,
-                    planned_question_count, created_at, updated_at
-                ) VALUES ('created', ?, ?, ?, ?, ?, ?, ?, ?)
+                    planned_question_count, parent_session_id, focus_areas_json,
+                    created_at, updated_at
+                ) VALUES ('created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _clean_text(company),
@@ -229,6 +236,8 @@ def create_session(
                     _clean_text(jd_snapshot),
                     _clean_text(resume_snapshot),
                     _bounded_int(planned_question_count, fallback=5, minimum=1, maximum=50),
+                    parent_session_id,
+                    json.dumps(focus_areas or [], ensure_ascii=False),
                     now,
                     now,
                 ),
@@ -243,9 +252,35 @@ def create_session(
             session["answered_question_count"] = 0
             session["reviewed_question_count"] = 0
             session["average_score"] = None
+            session["focus_areas"] = focus_areas or []
             return session
         finally:
             conn.close()
+
+
+def create_practice_session(*, parent_session_id: int) -> dict[str, Any]:
+    parent = get_session_detail(parent_session_id)
+    if not parent:
+        raise ValueError("Mock interview parent session not found")
+    if parent.get("status") != "completed" or not parent.get("report_focus_areas"):
+        raise ValueError("父会话必须已完成且已生成报告")
+
+    focus_areas = list(dict.fromkeys(
+        item.strip() for item in parent["report_focus_areas"] if str(item).strip()
+    ))[:50]
+    if not focus_areas:
+        raise ValueError("父会话报告没有可用的练习重点")
+
+    return create_session(
+        company=parent.get("company") or "",
+        role=parent.get("role") or "",
+        language=parent.get("language") or "中文",
+        jd_snapshot=parent.get("jd_snapshot") or "",
+        resume_snapshot=parent.get("resume_snapshot") or "",
+        planned_question_count=len(focus_areas),
+        parent_session_id=parent_session_id,
+        focus_areas=focus_areas,
+    )
 
 
 def add_question(
@@ -413,6 +448,12 @@ def get_session_detail(session_id: int) -> Optional[dict[str, Any]]:
     session = dict(session_row)
     questions = [_question_from_row(row) for row in question_rows]
     session["questions"] = questions
+    focus_raw = session.pop("focus_areas_json", None)
+    try:
+        parsed_focus = json.loads(focus_raw) if focus_raw else []
+        session["focus_areas"] = parsed_focus if isinstance(parsed_focus, list) else []
+    except (json.JSONDecodeError, TypeError):
+        session["focus_areas"] = []
     for field in ("report_strengths", "report_weaknesses", "report_focus_areas"):
         raw = session.pop(f"{field}_json", None)
         try:

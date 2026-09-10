@@ -26,6 +26,7 @@ export default function MockInterview() {
   const [reviewing, setReviewing] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [reporting, setReporting] = useState(false)
+  const [creatingPractice, setCreatingPractice] = useState(false)
   const [sessions, setSessions] = useState<MockInterviewSession[]>([])
   const [resumingSessionId, setResumingSessionId] = useState<number | null>(null)
 
@@ -58,6 +59,12 @@ export default function MockInterview() {
     question?.seq === plannedQuestionCount,
   )
   const canGenerateReport = Boolean(session && session.status === 'completed')
+  const sessionTransitionBusy = Boolean(
+    creating || finishing || reporting || creatingPractice || resumingSessionId !== null,
+  )
+  const canCreatePractice = Boolean(
+    session?.status === 'completed' && (session.report_focus_areas ?? []).length > 0,
+  )
 
   const handleResumeSession = async (sessionId: number) => {
     if (resumingSessionId !== null) return
@@ -188,6 +195,24 @@ export default function MockInterview() {
     }
   }
 
+  const handleCreatePracticeSession = async () => {
+    if (!session || !canCreatePractice || creatingPractice) return
+    setCreatingPractice(true)
+    setError(null)
+    try {
+      const practice = await api.mockInterviewCreatePracticeSession(session.id)
+      setSession(practice)
+      setQuestion(null)
+      setAnswer('')
+      setSessions((prev) => [practice, ...prev])
+      setStatusText('弱项复练会话已创建')
+    } catch (err) {
+      setError(getErrorMessage(err, '创建弱项复练会话失败'))
+    } finally {
+      setCreatingPractice(false)
+    }
+  }
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-bg-primary">
       <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-8">
@@ -277,7 +302,7 @@ export default function MockInterview() {
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={!role.trim() || creating}
+                disabled={!role.trim() || sessionTransitionBusy}
                 className="w-full min-h-[44px] rounded-xl bg-accent-blue text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creating ? '创建中…' : '开始模拟面试'}
@@ -327,7 +352,7 @@ export default function MockInterview() {
                   <button
                     type="button"
                     onClick={handleGenerateQuestion}
-                    disabled={!canGenerate || generating}
+                    disabled={!canGenerate || generating || sessionTransitionBusy}
                     className="min-h-[38px] rounded-lg border border-accent-blue/40 bg-accent-blue/10 px-3 text-sm font-medium text-accent-blue transition disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {generating ? '出题中…' : '生成下一题'}
@@ -335,7 +360,7 @@ export default function MockInterview() {
                   <button
                     type="button"
                     onClick={handleFinish}
-                    disabled={!canFinish || finishing}
+                    disabled={!canFinish || finishing || sessionTransitionBusy}
                     className="min-h-[38px] rounded-lg border border-bg-hover px-3 text-sm font-medium text-text-muted transition disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {finishing ? '完成中…' : '完成面试'}
@@ -343,7 +368,7 @@ export default function MockInterview() {
                   <button
                     type="button"
                     onClick={handleGenerateReport}
-                    disabled={!canGenerateReport || reporting}
+                    disabled={!canGenerateReport || reporting || sessionTransitionBusy}
                     className="min-h-[38px] rounded-lg border border-accent-blue/40 px-3 text-sm font-medium text-accent-blue transition disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {reporting ? '报告生成中…' : '生成整场报告'}
@@ -384,6 +409,17 @@ export default function MockInterview() {
                       ))}
                     </ul>
                   </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleCreatePracticeSession}
+                    disabled={!canCreatePractice || creatingPractice || sessionTransitionBusy}
+                    className="min-h-[38px] rounded-lg bg-accent-blue px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {creatingPractice ? '复练会话创建中…' : '开始弱项复练'}
+                  </button>
                 </div>
               </article>
             )}

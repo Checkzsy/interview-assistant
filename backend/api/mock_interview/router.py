@@ -145,6 +145,19 @@ async def generate_session_report_endpoint(session_id: int):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/mock-interview/sessions/{session_id}/practice")
+async def create_practice_session(session_id: int):
+    if not mock_interview.get_session_detail(session_id):
+        raise HTTPException(status_code=404, detail="模拟面试会话不存在")
+    try:
+        return mock_interview.create_practice_session(parent_session_id=session_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail="模拟面试会话不存在") from exc
+        raise HTTPException(status_code=409, detail=message) from exc
+
+
 @router.post("/mock-interview/sessions/{session_id}/finish")
 async def finish_session(session_id: int):
     detail = mock_interview.get_session_detail(session_id)
