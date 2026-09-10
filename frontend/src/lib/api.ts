@@ -147,6 +147,8 @@ export interface KBStatus {
   total_chunks: number
   last_mtime: number
   deps: { docx: boolean; pdf: boolean; ocr: boolean; vision: boolean }
+  semantic_enabled: boolean
+  semantic_top_k: number
 }
 
 export interface KBRecentHit {

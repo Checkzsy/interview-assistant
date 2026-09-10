@@ -1,4 +1,4 @@
-import { Check, CircleOff, Settings2, Zap } from 'lucide-react'
+import { Check, CircleOff, Settings2, Sparkles, Zap } from 'lucide-react'
 import { useKbStore } from '@/stores/kbStore'
 import { useInterviewStore } from '@/stores/configStore'
 
@@ -110,6 +110,17 @@ export default function KbStatusHeader() {
       </div>
 
       <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+        <span
+          title={status.semantic_enabled ? `语义检索已启用 · top ${status.semantic_top_k}` : '语义检索未启用'}
+          className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md border ${
+            status.semantic_enabled
+              ? 'border-accent-blue/30 bg-accent-blue/10 text-accent-blue'
+              : 'border-bg-hover/50 bg-bg-tertiary/40 text-text-muted/70'
+          }`}
+        >
+          <Sparkles className="w-2.5 h-2.5" strokeWidth={2} />
+          {status.semantic_enabled ? `语义 · top ${status.semantic_top_k}` : '语义 off'}
+        </span>
         {Object.entries(status.deps).map(([k, v]) => (
           <span
             key={k}
