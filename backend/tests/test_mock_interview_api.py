@@ -255,3 +255,15 @@ def test_practice_session_endpoint_rejects_unfinished_parent(tmp_path, monkeypat
 
     assert res.status_code == 409
     assert "已完成且已生成报告" in res.json()["detail"]
+
+
+def test_mock_interview_package_exposes_init_db(tmp_path, monkeypatch):
+    """Packaged backend boots via main.lifespan -> api.mock_interview.init_db()."""
+    from api import mock_interview as mock_interview_api
+
+    assert hasattr(mock_interview_api, "init_db"), "main.lifespan calls mock_interview.init_db()"
+
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview_api.init_db()
+
+    assert (tmp_path / "mock_interview.db").exists()

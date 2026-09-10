@@ -50,4 +50,5 @@ test('backend environment is isolated only in packaged mode', () => {
   const packagedEnv = buildBackendEnvironment(packagedPaths, {})
   assert.strictEqual(packagedEnv.IA_DATA_DIR, packagedPaths.dataDir)
   assert.strictEqual(packagedEnv.IA_CONFIG_PATH, packagedPaths.configPath)
+  assert.strictEqual(packagedEnv.IA_FRONTEND_DIST, packagedPaths.frontendDist)
 })

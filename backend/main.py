@@ -21,6 +21,7 @@ from core.auth import (
 )
 from core.config import get_config
 from core.env import env_int
+from core.runtime_paths import frontend_dist
 from core.logger import setup_logging, get_logger
 from services.stt import get_stt_engine
 from api.realtime import ws
@@ -33,7 +34,7 @@ _log = get_logger("app.main")
 # H5: 扩大广播队列容量，避免 LLM 流式输出被截断
 _BQ_SIZE = env_int("IA_BROADCAST_QUEUE_SIZE", 2000, minimum=1)
 
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+FRONTEND_DIR = frontend_dist()
 
 
 def _is_path_within_dir(base_dir: str, candidate_path: str) -> bool:

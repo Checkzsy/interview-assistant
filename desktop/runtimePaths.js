@@ -30,6 +30,7 @@ function buildBackendEnvironment(runtimePaths, baseEnvironment = {}) {
   if (runtimePaths.isPackaged) {
     env.IA_DATA_DIR = runtimePaths.dataDir
     env.IA_CONFIG_PATH = runtimePaths.configPath
+    env.IA_FRONTEND_DIST = runtimePaths.frontendDist
   }
   return env
 }
