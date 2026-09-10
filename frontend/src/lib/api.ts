@@ -402,6 +402,10 @@ export const api = {
     request('/api/review/profile'),
 
   // Mock interview
+  mockInterviewSessions: () =>
+    request<{ items: MockInterviewSession[]; total: number; page: number; page_size: number }>('/api/mock-interview/sessions'),
+  mockInterviewSession: (sessionId: number) =>
+    request<MockInterviewSession>(`/api/mock-interview/sessions/${sessionId}`),
   mockInterviewCreateSession: (data: MockInterviewCreateSessionInput) =>
     request<MockInterviewSession>('/api/mock-interview/sessions', {
       method: 'POST',

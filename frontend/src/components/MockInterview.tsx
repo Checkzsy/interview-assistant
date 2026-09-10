@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   api,
   getErrorMessage,
@@ -26,7 +26,22 @@ export default function MockInterview() {
   const [reviewing, setReviewing] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [reporting, setReporting] = useState(false)
+  const [sessions, setSessions] = useState<MockInterviewSession[]>([])
+  const [resumingSessionId, setResumingSessionId] = useState<number | null>(null)
 
+  useEffect(() => {
+    let cancelled = false
+    api.mockInterviewSessions()
+      .then((res) => {
+        if (!cancelled) setSessions(res.items)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(getErrorMessage(err, '加载历史会话失败'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const plannedQuestionCount = session?.planned_question_count ?? 0
 
   const canGenerate =
@@ -44,6 +59,34 @@ export default function MockInterview() {
   )
   const canGenerateReport = Boolean(session && session.status === 'completed')
 
+  const handleResumeSession = async (sessionId: number) => {
+    if (resumingSessionId !== null) return
+    setResumingSessionId(sessionId)
+    setError(null)
+    try {
+      const detail = await api.mockInterviewSession(sessionId)
+      setSession(detail)
+      setCompany(detail.company)
+      setRole(detail.role)
+      setLanguage(detail.language)
+      setJdSnapshot(detail.jd_snapshot ?? '')
+      setResumeSnapshot(detail.resume_snapshot ?? '')
+      setPlannedCount(detail.planned_question_count)
+
+      const questions = detail.questions ?? []
+      const currentQuestion =
+        questions.find((item) => item.status === 'waiting_answer' || item.status === 'answered')
+        ?? questions[questions.length - 1]
+        ?? null
+      setQuestion(currentQuestion)
+      setAnswer(currentQuestion?.answer_text ?? '')
+      setStatusText('已恢复会话')
+    } catch (err) {
+      setError(getErrorMessage(err, '恢复会话失败'))
+    } finally {
+      setResumingSessionId(null)
+    }
+  }
   const handleCreate = async () => {
     if (!role.trim() || creating) return
     setCreating(true)
@@ -242,6 +285,37 @@ export default function MockInterview() {
             </div>
           </section>
 
+          <section className="rounded-2xl border border-bg-hover bg-bg-secondary p-4">
+            <h2 className="mb-3 text-sm font-semibold text-text-primary">历史会话</h2>
+            {sessions.length === 0 ? (
+              <p className="text-xs text-text-muted">暂无历史会话</p>
+            ) : (
+              <ul className="space-y-2">
+                {sessions.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      aria-label={`恢复 ${item.company || '未命名公司'} ${item.role}会话`}
+                      onClick={() => handleResumeSession(item.id)}
+                      disabled={resumingSessionId !== null}
+                      className="w-full rounded-xl border border-bg-hover bg-bg-tertiary px-3 py-2 text-left transition hover:border-accent-blue/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="block truncate text-xs font-medium text-text-primary">
+                        {item.company || '未命名公司'} · {item.role}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-text-muted">
+                        {item.question_count ?? 0}/{item.planned_question_count} 题 ·
+                        {item.status === 'completed' ? '已完成' : item.status === 'created' ? '待开始' : '进行中'}
+                      </span>
+                      {resumingSessionId === item.id && (
+                        <span className="mt-1 block text-[11px] text-accent-blue">恢复中…</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
           <section className="space-y-4">
             <div className="rounded-2xl border border-bg-hover bg-bg-secondary p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">

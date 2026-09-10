@@ -9,6 +9,8 @@ const apiMock = vi.hoisted(() => ({
   mockInterviewGenerateFeedback: vi.fn(),
   mockInterviewFinishSession: vi.fn(),
   mockInterviewGenerateReport: vi.fn(),
+  mockInterviewSessions: vi.fn(),
+  mockInterviewSession: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -16,6 +18,15 @@ vi.mock('@/lib/api', () => ({
   getErrorMessage: (error: unknown, fallback = '操作失败') =>
     error instanceof Error && error.message ? error.message : fallback,
 }))
+
+beforeEach(() => {
+  apiMock.mockInterviewSessions.mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 20,
+  })
+})
 
 describe('MockInterview', () => {
   beforeEach(() => {
@@ -267,5 +278,78 @@ describe('MockInterview planned question boundaries', () => {
     expect(screen.getByRole('button', { name: '完成面试' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: '完成面试' }))
     await waitFor(() => expect(apiMock.mockInterviewFinishSession).toHaveBeenCalledWith(8))
+  })
+})
+
+
+
+describe('MockInterview session history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('loads sessions and restores an in-progress question with its answer', async () => {
+    apiMock.mockInterviewSessions.mockResolvedValue({
+      items: [
+        {
+          id: 9,
+          status: 'in_progress',
+          company: 'ACME',
+          role: '后端开发',
+          language: '中文',
+          planned_question_count: 1,
+          question_count: 1,
+          answered_question_count: 1,
+          reviewed_question_count: 0,
+          average_score: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    apiMock.mockInterviewSession.mockResolvedValue({
+      id: 9,
+      status: 'in_progress',
+      company: 'ACME',
+      role: '后端开发',
+      language: '中文',
+      jd_snapshot: '负责高并发服务',
+      resume_snapshot: '做过订单查询优化',
+      planned_question_count: 1,
+      question_count: 1,
+      answered_question_count: 1,
+      reviewed_question_count: 0,
+      average_score: null,
+      questions: [
+        {
+          id: 31,
+          session_id: 9,
+          seq: 1,
+          question_text: '请介绍你在 FastAPI 项目中做过的一次接口性能优化。',
+          question_type: 'project',
+          status: 'answered',
+          skill_tags: ['FastAPI'],
+          answer_text: '我用 Redis 缓存热点查询，并将 P95 延迟从 800ms 降到 120ms。',
+          overall_score: null,
+          feedback: null,
+        },
+      ],
+    })
+
+    render(<MockInterview />)
+
+    const resumeButton = await screen.findByRole('button', { name: /恢复 ACME 后端开发会话/ })
+    fireEvent.click(resumeButton)
+
+    await waitFor(() => expect(apiMock.mockInterviewSessions).toHaveBeenCalled())
+    await waitFor(() => expect(apiMock.mockInterviewSession).toHaveBeenCalledWith(9))
+    await waitFor(() =>
+      expect(screen.getByText('请介绍你在 FastAPI 项目中做过的一次接口性能优化。')).toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('你的回答')).toHaveValue(
+      '我用 Redis 缓存热点查询，并将 P95 延迟从 800ms 降到 120ms。',
+    )
+    expect(screen.getByText('已恢复会话')).toBeInTheDocument()
   })
 })
