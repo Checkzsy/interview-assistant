@@ -217,13 +217,13 @@ desktop/dist/Interview Assistant Setup 1.0.0.exe
 当前打包边界：
 
 - 使用 electron-builder / NSIS，默认 per-user 安装。
-- Electron 壳、前端 `dist`、后端源码和 `start.py` 会进入安装包。
+- Electron 壳、前端 `dist` 和后端可执行文件会进入安装包。
+- 安装包内置 PyInstaller 打好的独立后端 `resources/backend/backend.exe`，目标机器无需 Python。
+- 打包链会先执行 `npm run build:backend`（PyInstaller），再把产物放入 `resources/backend`。
+- 构建机需要安装后端依赖和 PyInstaller；脚本会排除与项目无关的重型依赖（torch/pandas/scipy 等）。
 - 运行时数据与配置写入 Electron `userData` 目录，不写入安装目录。
-- 尚未内置 Python 运行时；目标机器需要 Python `3.10+`，首次启动会安装后端依赖。
 - 安装包未做 Authenticode 签名，Windows SmartScreen 可能提示风险。
 - 若只需验证目录布局，可在 `desktop/` 执行 `npm run dist:dir`。
-
-## 开发与自测
 
 ```bash
 cd frontend && npm run dev

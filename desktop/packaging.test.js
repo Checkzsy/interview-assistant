@@ -3,8 +3,9 @@ const assert = require('node:assert')
 
 test('desktop package defines a safe electron-builder layout', () => {
   const pkg = require('./package.json')
-  assert.strictEqual(pkg.scripts.dist, 'electron-builder --win nsis --x64')
-  assert.strictEqual(pkg.scripts['dist:dir'], 'electron-builder --win --x64 --dir')
+  assert.strictEqual(pkg.scripts.dist, 'npm run build:backend && electron-builder --win nsis --x64')
+  assert.strictEqual(pkg.scripts['dist:dir'], 'npm run build:backend && electron-builder --win --x64 --dir')
+  assert.ok(pkg.scripts['build:backend'])
 
   const build = pkg.build
   assert.ok(build)
@@ -16,19 +17,7 @@ test('desktop package defines a safe electron-builder layout', () => {
   }
 
   const resources = build.extraResources
-  const backendTargets = resources.filter((item) => item.to?.startsWith('backend/'))
-  for (const target of [
-    'backend/api',
-    'backend/core',
-    'backend/services',
-    'backend/assets',
-    'backend/main.py',
-    'backend/requirements.txt',
-    'backend/pyproject.toml',
-    'backend/config.example.json',
-  ]) {
-    assert.ok(backendTargets.some((item) => item.to === target), `missing ${target}`)
-  }
+  assert.ok(resources.some((item) => item.to === 'backend'))
   assert.ok(!resources.some((item) => item.from === '../backend' && !item.filter))
 
   const frontend = resources.find((item) => item.to === 'frontend/dist')

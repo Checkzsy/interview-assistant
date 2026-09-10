@@ -25,6 +25,7 @@ test('packaged runtime uses extraResources and writable user data', () => {
   assert.strictEqual(result.backendDir, path.join(resourcesPath, 'backend'))
   assert.strictEqual(result.frontendDist, path.join(resourcesPath, 'frontend', 'dist'))
   assert.strictEqual(result.startScript, path.join(resourcesPath, 'start.py'))
+  assert.strictEqual(result.backendExecutable, path.join(resourcesPath, 'backend', 'backend.exe'))
   assert.strictEqual(result.dataDir, path.join(appDataPath, 'data'))
   assert.strictEqual(result.configPath, path.join(appDataPath, 'config.json'))
 })

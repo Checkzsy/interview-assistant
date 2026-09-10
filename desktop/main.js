@@ -314,13 +314,20 @@ function waitForServer(timeout = 40000) {
 }
 
 function startPythonBackend() {
-  const python = process.platform === 'win32' ? 'python' : 'python3';
-  pythonProcess = spawn(python, [
-    RUNTIME_PATHS.startScript,
-    '--mode', 'network',
-    '--no-build',
-    '--port', String(PORT),
-  ], {
+  const packagedExecutable =
+    RUNTIME_PATHS.backendExecutable && fs.existsSync(RUNTIME_PATHS.backendExecutable);
+  const command = packagedExecutable
+    ? RUNTIME_PATHS.backendExecutable
+    : process.platform === 'win32' ? 'python' : 'python3';
+  const args = packagedExecutable
+    ? []
+    : [
+        RUNTIME_PATHS.startScript,
+        '--mode', 'network',
+        '--no-build',
+        '--port', String(PORT),
+      ];
+  pythonProcess = spawn(command, args, {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: buildBackendEnvironment(RUNTIME_PATHS, process.env),
