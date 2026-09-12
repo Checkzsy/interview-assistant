@@ -7,6 +7,11 @@ from api.assist.pipeline import (
     shutdown_background_workers,
     stop_interview_loop,
 )
+from api.assist.translate_worker import (
+    init_translate_worker,
+    stop_translate_worker,
+    submit_translation,
+)
 
 __all__ = [
     "router",
@@ -14,4 +19,7 @@ __all__ = [
     "init_background_workers",
     "preload_candidate_asr_if_enabled",
     "shutdown_background_workers",
+    "init_translate_worker",
+    "stop_translate_worker",
+    "submit_translation",
 ]

@@ -51,6 +51,7 @@ class AssistAsrStateMachine:
         self.merge_mono_first: Optional[float] = None
         self.merge_mono_last: Optional[float] = None
         self.pending_group: Optional[PendingASRGroup] = None
+        self.next_transcription_seq = 0
 
     def reset_merge_buffer(self):
         self.merge_parts = []
@@ -173,6 +174,8 @@ class AssistAsrStateMachine:
             return
         session.add_transcription(pub)
         self.broadcast({"type": "transcription", "text": pub})
+        self.next_transcription_seq += 1
+        _submit_translation(self.next_transcription_seq, pub)
         if cfg.auto_detect:
             source = (
                 "conversation_loopback"
@@ -212,6 +215,8 @@ class AssistAsrStateMachine:
         if gap <= 0:
             session.add_transcription(pub)
             self.broadcast({"type": "transcription", "text": pub})
+            self.next_transcription_seq += 1
+            _submit_translation(self.next_transcription_seq, pub)
             if cfg.auto_detect:
                 source = (
                     "conversation_loopback"
@@ -252,3 +257,26 @@ def _asr_late_constraint_grace_sec(cfg) -> float:
 
 def asr_interrupt_running(cfg) -> bool:
     return bool(getattr(cfg, "assist_asr_interrupt_running", True))
+
+
+_DEFAULT_TRANSLATE_TARGET_LANG = "zh"
+
+
+def _submit_translation(seq: int, text: str) -> bool:
+    """把转录文本投递给实时翻译 worker；未初始化时静默忽略。
+
+    asr_state -> translate_worker 的模块级可覆盖钩子：通过 lazy import +
+    getattr 读取 translate_worker 模块里的 submit_translation 函数指针，
+    避免顶层循环 import。测试可 monkeypatch 本函数实现覆盖。
+    """
+    try:
+        import api.assist.translate_worker as _tw
+        submit_fn = getattr(_tw, "submit_translation", None)
+    except Exception:
+        return False
+    if submit_fn is None:
+        return False
+    try:
+        return bool(submit_fn(seq, text, _DEFAULT_TRANSLATE_TARGET_LANG))
+    except Exception:
+        return False

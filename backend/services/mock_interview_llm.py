@@ -80,7 +80,27 @@ def _validation_error(field: str) -> MockInterviewLLMError:
     return MockInterviewLLMError(f"模型返回的 {field} 无效。")
 
 
-def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str, Any]]) -> str:
+def _kb_context_block(kb_context: Optional[list[dict[str, Any]]]) -> str:
+    """构建出题提示中的知识库参考信息块。
+
+    空或 None 时返回空字符串，保证默认提示文本与原来完全一致。
+    """
+    if not kb_context:
+        return ""
+    lines = ["参考资料："]
+    for item in kb_context[:5]:
+        if not isinstance(item, dict):
+            continue
+        text = (item.get("text") or "")[:200]
+        path = item.get("path") or ""
+        lines.append(f"- [{path}] {text}")
+    return "\n".join(lines)
+
+def _question_prompt(
+    session: dict[str, Any],
+    previous_questions: list[dict[str, Any]],
+    kb_context: Optional[list[dict[str, Any]]] = None,
+) -> str:
     previous_lines: list[str] = []
     for index, item in enumerate(previous_questions):
         seq = item.get("seq", index + 1)
@@ -99,6 +119,8 @@ def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str,
         else None
     )
     target_focus_text = target_focus_area or "\uff08\u65e0\uff09"
+    kb_block = _kb_context_block(kb_context)
+    kb_section = f"{kb_block}\n\n" if kb_block else ""
     return f"""你是一名严谨的{session.get('language') or '中文'}技术面试官，正在面试{session.get('company') or '未提供公司'}的{session.get('role') or '未提供岗位'}候选人。
 
 岗位描述快照：
@@ -107,7 +129,7 @@ def _question_prompt(session: dict[str, Any], previous_questions: list[dict[str,
 简历快照：
 {session.get('resume_snapshot') or '（未提供）'}
 
-弱项复练重点：
+{kb_section}弱项复练重点：
 {focus_text}
 
 本题弱项复练重点：{target_focus_text}
@@ -250,8 +272,9 @@ def generate_question(
     session: dict[str, Any],
     previous_questions: Optional[list[dict[str, Any]]] = None,
     chat_json: ChatJson,
+    kb_context: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
-    prompt = _question_prompt(session, previous_questions or [])
+    prompt = _question_prompt(session, previous_questions or [], kb_context)
     try:
         draft = QuestionDraft(**_extract_json(chat_json(prompt)))
     except ValidationError:

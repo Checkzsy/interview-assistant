@@ -81,8 +81,37 @@ def build_dry_run_evaluator() -> Callable[[dict[str, Any]], dict[str, bool]]:
     return evaluator
 
 
-def build_real_evaluator() -> Callable[[dict[str, Any]], dict[str, bool]]:
-    """Evaluator backed by the configured review model (DeepSeek/OpenAI-compatible)."""
+def build_real_evaluator(
+    client=None,
+    chat_json: Callable[[str], Any] | None = None,
+) -> Callable[[dict[str, Any]], dict[str, bool]]:
+    """Evaluator backed by the configured review model (DeepSeek/OpenAI-compatible).
+
+    ``chat_json`` takes precedence; otherwise a ``client`` is used to build a
+    chat_json wrapper; otherwise falls back to ``mock_interview_llm.default_chat_json``.
+    """
+    if chat_json is not None:
+        return build_llm_evaluator(chat_json=chat_json)
+
+    if client is not None:
+        from core.config import get_config
+
+        model = get_config().get_review_model()
+
+        def _chat_json(prompt: str) -> Any:
+            response = client.chat.completions.create(
+                model=model.model,
+                messages=[
+                    {"role": "system", "content": "你是严谨的面试官，只返回合法 JSON。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=1600,
+            )
+            return response.choices[0].message.content
+
+        return build_llm_evaluator(chat_json=_chat_json)
+
     from services.mock_interview_llm import default_chat_json
 
     return build_llm_evaluator(chat_json=default_chat_json)

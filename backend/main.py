@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
     dispatch_task = asyncio.create_task(ws.ws_dispatcher())
     heartbeat_task = asyncio.create_task(ws.ws_heartbeat())
     assist.init_background_workers()
+    # 实时翻译 worker：ASR 转录广播后投递翻译，翻译失败不阻塞录音/答题主流程。
+    assist.init_translate_worker(ws.broadcast)
     threading.Thread(target=_preload_stt, daemon=True).start()
     assist.preload_candidate_asr_if_enabled()
     try:
@@ -100,6 +102,7 @@ async def lifespan(app: FastAPI):
     _log.info("SHUTDOWN cleaning up")
     assist.stop_interview_loop()
     assist.shutdown_background_workers()
+    assist.stop_translate_worker()
     dispatch_task.cancel()
     heartbeat_task.cancel()
 
