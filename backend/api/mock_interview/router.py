@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
+from core.config import get_config
 from services import mock_interview_llm
 from services.storage import mock_interview
 
@@ -25,6 +27,37 @@ def _llm_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, mock_interview_llm.MockInterviewLLMError):
         return HTTPException(status_code=502, detail=str(exc))
     return HTTPException(status_code=502, detail="模拟面试模型调用失败，请检查模型配置。")
+
+
+async def _kb_context_for_question(session: dict) -> list[dict]:
+    """针对出题查询检索知识库，返回注入 prompt 的 KB 片段。
+
+    KB 关闭或无命中时返回空列表，调用方不传 kb_context，
+    保持与未启用 KB 时逐字节一致的行为。
+    """
+    cfg = get_config()
+    if not bool(getattr(cfg, "kb_enabled", False)):
+        return []
+    query = (session.get("jd_snapshot") or session.get("role") or "").strip()
+    if not query:
+        return []
+    try:
+        from services.kb.retriever import retrieve as _kb_retrieve
+
+        hits = await run_in_threadpool(
+            _kb_retrieve,
+            query,
+            int(getattr(cfg, "kb_top_k", 4) or 4),
+            int(getattr(cfg, "kb_deadline_ms", 150) or 150),
+            mode="manual_text",
+        )
+    except Exception:
+        return []
+    return [
+        {"path": hit.path, "text": hit.excerpt(200)}
+        for hit in hits
+        if getattr(hit, "excerpt", None)
+    ]
 
 
 @router.post("/mock-interview/sessions")
@@ -65,12 +98,22 @@ async def generate_question(session_id: int):
     if detail["question_count"] >= detail["planned_question_count"]:
         raise HTTPException(status_code=409, detail="已达到本场计划题数")
 
+    kb_context = await _kb_context_for_question(detail)
+
     try:
-        draft = mock_interview_llm.generate_question(
-            session=detail,
-            previous_questions=detail["questions"],
-            chat_json=mock_interview_llm.default_chat_json,
-        )
+        if kb_context:
+            draft = mock_interview_llm.generate_question(
+                session=detail,
+                previous_questions=detail["questions"],
+                chat_json=mock_interview_llm.default_chat_json,
+                kb_context=kb_context,
+            )
+        else:
+            draft = mock_interview_llm.generate_question(
+                session=detail,
+                previous_questions=detail["questions"],
+                chat_json=mock_interview_llm.default_chat_json,
+            )
     except Exception as exc:
         raise _llm_http_error(exc) from exc
 
@@ -156,7 +199,6 @@ async def create_practice_session(session_id: int):
         if "not found" in message:
             raise HTTPException(status_code=404, detail="模拟面试会话不存在") from exc
         raise HTTPException(status_code=409, detail=message) from exc
-
 
 @router.post("/mock-interview/sessions/{session_id}/finish")
 async def finish_session(session_id: int):

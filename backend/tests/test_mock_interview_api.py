@@ -53,6 +53,12 @@ def test_mock_interview_text_flow_persists_question_answer_and_feedback(tmp_path
         }
 
     monkeypatch.setattr(router.mock_interview_llm, "generate_question", fake_generate_question)
+    # 隔离本机 KB 环境：路由出题路径的 KB 检索必须不注入 kb_context，
+    # 避免依赖开发者机器上的 kb_enabled / 知识库数据。
+    async def _no_kb(session):
+        return []
+
+    monkeypatch.setattr(router, "_kb_context_for_question", _no_kb)
     monkeypatch.setattr(router.mock_interview_llm, "generate_feedback", fake_generate_feedback)
 
     with _client() as client:
