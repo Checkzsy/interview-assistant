@@ -23,6 +23,7 @@ export default function MockInterview() {
   const [creating, setCreating] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [audioSubmitting, setAudioSubmitting] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [reporting, setReporting] = useState(false)
@@ -146,6 +147,27 @@ export default function MockInterview() {
       setError(getErrorMessage(err, '提交回答失败'))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleSubmitAudioAnswer = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!question || question.status !== 'waiting_answer' || !file || audioSubmitting) return
+    if (!file.name.toLowerCase().endsWith('.wav') && file.type !== 'audio/wav') {
+      setError('仅支持 WAV 格式的语音回答')
+      return
+    }
+    setAudioSubmitting(true)
+    setError(null)
+    try {
+      const updated = await api.mockInterviewSubmitAudioAnswer(question.id, file)
+      setQuestion((prev) => (prev ? { ...prev, ...updated } : updated))
+      setStatusText('语音回答已转写并提交')
+    } catch (err) {
+      setError(getErrorMessage(err, '上传语音回答失败'))
+    } finally {
+      setAudioSubmitting(false)
     }
   }
 
@@ -457,7 +479,17 @@ export default function MockInterview() {
                     placeholder="按背景、做法、结果、取舍的顺序回答会更清晰"
                     className="w-full resize-y rounded-lg border border-bg-hover bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-blue/60 disabled:opacity-70"
                   />
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <label className="inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-bg-hover px-4 text-sm font-medium text-text-muted transition hover:text-text-secondary disabled:cursor-not-allowed disabled:opacity-50">
+                      {audioSubmitting ? '转写中…' : '上传语音回答（WAV）'}
+                      <input
+                        type="file"
+                        accept=".wav,audio/wav"
+                        className="sr-only"
+                        disabled={question.status !== 'waiting_answer' || audioSubmitting || submitting}
+                        onChange={handleSubmitAudioAnswer}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={handleSubmitAnswer}

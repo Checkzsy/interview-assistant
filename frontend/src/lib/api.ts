@@ -425,6 +425,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ answer_text: answerText }),
     }),
+  mockInterviewSubmitAudioAnswer: async (questionId: number, file: File, durationMs = 0) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('duration_ms', String(durationMs))
+    const token = getAuthToken()
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetchBackend(buildApiUrl(`/api/mock-interview/questions/${questionId}/answer/audio`), {
+      method: 'POST',
+      body: fd,
+      headers,
+    })
+    if (!res.ok) {
+      throw new Error(await buildResponseErrorMessage(res, '语音回答上传失败'))
+    }
+    return res.json() as Promise<MockInterviewQuestion>
+  },
   mockInterviewGenerateFeedback: (questionId: number) =>
     request<MockInterviewQuestion>(`/api/mock-interview/questions/${questionId}/feedback`, {
       method: 'POST',

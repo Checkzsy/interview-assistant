@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from core.config import get_config
-from services import mock_interview_llm
+from services import mock_interview_audio, mock_interview_llm
 from services.storage import mock_interview
 
 router = APIRouter()
@@ -27,6 +27,12 @@ def _llm_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, mock_interview_llm.MockInterviewLLMError):
         return HTTPException(status_code=502, detail=str(exc))
     return HTTPException(status_code=502, detail="模拟面试模型调用失败，请检查模型配置。")
+
+
+def _audio_answer_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, mock_interview_audio.AudioAnswerError):
+        return HTTPException(status_code=422, detail=str(exc))
+    return HTTPException(status_code=422, detail="语音作答处理失败，请稍后重试。")
 
 
 async def _kb_context_for_question(session: dict) -> list[dict]:
@@ -136,6 +142,42 @@ async def submit_answer(question_id: int, req: SubmitAnswerRequest):
             question_id=question_id,
             answer_text=req.answer_text,
             duration_ms=req.duration_ms,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail="模拟面试题目不存在") from exc
+        raise HTTPException(status_code=409, detail=message) from exc
+
+
+@router.post("/mock-interview/questions/{question_id}/answer/audio")
+async def submit_audio_answer(
+    question_id: int,
+    file: UploadFile = File(...),
+    duration_ms: int = 0,
+):
+    """接收 WAV 语音回答，ASR 转写后按文字回答落库。"""
+    raw = await file.read()
+    cfg = get_config()
+    try:
+        audio, sample_rate = mock_interview_audio.decode_wav_to_float32(raw)
+        answer_text = await run_in_threadpool(
+            mock_interview_audio.transcribe_answer,
+            audio,
+            sample_rate,
+            getattr(cfg, "position", "") or "",
+            getattr(cfg, "language", "") or "",
+        )
+    except mock_interview_audio.AudioAnswerError as exc:
+        raise _audio_answer_error(exc) from exc
+    except Exception as exc:
+        raise _audio_answer_error(exc) from exc
+
+    try:
+        return mock_interview.submit_answer(
+            question_id=question_id,
+            answer_text=answer_text,
+            duration_ms=duration_ms,
         )
     except ValueError as exc:
         message = str(exc)

@@ -6,6 +6,7 @@ const apiMock = vi.hoisted(() => ({
   mockInterviewCreateSession: vi.fn(),
   mockInterviewGenerateQuestion: vi.fn(),
   mockInterviewSubmitAnswer: vi.fn(),
+  mockInterviewSubmitAudioAnswer: vi.fn(),
   mockInterviewGenerateFeedback: vi.fn(),
   mockInterviewFinishSession: vi.fn(),
   mockInterviewGenerateReport: vi.fn(),
@@ -208,6 +209,32 @@ describe('MockInterview', () => {
 })
 
 
+  it('submits a WAV audio answer and marks the question answered', async () => {
+    apiMock.mockInterviewSubmitAudioAnswer.mockResolvedValue({
+      id: 11,
+      session_id: 7,
+      seq: 1,
+      status: 'answered',
+      answer_text: '我用 Redis 做缓存优化。',
+    })
+    render(<MockInterview />)
+
+    fireEvent.change(screen.getByLabelText('公司'), { target: { value: 'ACME' } })
+    fireEvent.change(screen.getByLabelText('岗位'), { target: { value: '后端开发' } })
+    fireEvent.change(screen.getByLabelText('计划题数'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟面试' }))
+    await waitFor(() => expect(apiMock.mockInterviewCreateSession).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: /^生成下一题$/ }))
+    await waitFor(() => expect(apiMock.mockInterviewGenerateQuestion).toHaveBeenCalled())
+
+    const input = screen.getByLabelText('上传语音回答（WAV）') as HTMLInputElement
+    const file = new File(['wav'], 'answer.wav', { type: 'audio/wav' })
+    fireEvent.change(input, { target: { files: [file] } })
+    await waitFor(() => expect(apiMock.mockInterviewSubmitAudioAnswer).toHaveBeenCalled())
+    expect(apiMock.mockInterviewSubmitAudioAnswer).toHaveBeenCalledWith(11, file)
+  })
+
 describe('MockInterview action boundaries', () => {
   it('disables interview actions until prerequisites are met', () => {
     render(<MockInterview />)
@@ -395,4 +422,7 @@ describe('MockInterview session history', () => {
     )
     expect(screen.getByText('已恢复会话')).toBeInTheDocument()
   })
+
+
+
 })
