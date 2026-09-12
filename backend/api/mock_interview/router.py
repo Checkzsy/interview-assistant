@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -228,6 +228,49 @@ async def generate_session_report_endpoint(session_id: int):
         return mock_interview.save_session_report(session_id=session_id, **report)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/mock-interview/sessions/{session_id}/report/export")
+async def export_session_report(session_id: int):
+    """把整场报告导出为 Markdown 下载（学习沉淀）。
+
+    报告未生成时返回 409；不存在会话返回 404。
+    """
+    detail = mock_interview.get_session_detail(session_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="模拟面试会话不存在")
+    if not (detail.get("report_markdown") or "").strip():
+        raise HTTPException(status_code=409, detail="整场报告尚未生成，请先生成报告")
+
+    from urllib.parse import quote
+
+    company = (detail.get("company") or "").strip() or "unnamed"
+    role = (detail.get("role") or "").strip() or "unknown"
+    md = detail["report_markdown"]
+    filename = f"mock-interview-{session_id}-{company}-{role}.md".replace("/", "_").replace("\\", "_")
+    # RFC 5987: header 行只允许 ASCII，中文文件名用 filename* 编码
+    encoded = quote(filename)
+
+    def _list_block(title: str, items) -> str:
+        items = [str(x).strip() for x in (items or []) if str(x).strip()]
+        if not items:
+            return ""
+        lines = "\n".join(f"- {item}" for item in items)
+        return f"\n## {title}\n{lines}\n"
+
+    body = (
+        f"# 模拟面试报告：{company} · {role}\n\n"
+        f"> 会话 ID：{session_id}｜生成时间：{detail.get('report_generated_at') or '—'}\n\n"
+        f"{md}\n"
+        f"{_list_block('优势', detail.get('report_strengths'))}"
+        f"{_list_block('弱项', detail.get('report_weaknesses'))}"
+        f"{_list_block('练习重点', detail.get('report_focus_areas'))}"
+    )
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
+    )
 
 
 @router.post("/mock-interview/sessions/{session_id}/practice")

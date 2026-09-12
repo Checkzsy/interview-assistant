@@ -456,7 +456,14 @@ export default function MockInterview() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                  <a
+                    href={api.mockInterviewExportReportUrl(session.id)}
+                    download
+                    className="min-h-[38px] inline-flex items-center rounded-lg border border-accent-blue/40 px-4 text-sm font-medium text-accent-blue transition hover:bg-accent-blue/10"
+                  >
+                    导出报告
+                  </a>
                   <button
                     type="button"
                     onClick={handleCreatePracticeSession}

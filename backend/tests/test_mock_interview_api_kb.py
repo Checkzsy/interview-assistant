@@ -131,3 +131,51 @@ def test_generate_question_omits_kb_context_when_retrieve_raises(tmp_path, monke
         q = client.post(f"/api/mock-interview/sessions/{session['id']}/questions")
         assert q.status_code == 200
         assert captured["kb_context"] is None or captured["kb_context"] == []
+
+def test_export_session_report_returns_markdown_download(tmp_path, monkeypatch):
+    import importlib
+    router = importlib.import_module("api.mock_interview.router")
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+
+    session = mock_interview.create_session(
+        company="ACME", role="后端", language="中文",
+        jd_snapshot="", resume_snapshot="", planned_question_count=1,
+    )
+    q = mock_interview.add_question(session_id=session["id"], seq=1, question_text="Redis 持久化有哪些方式？")
+    mock_interview.submit_answer(question_id=q["id"], answer_text="RDB 和 AOF。")
+    mock_interview.save_feedback(
+        question_id=q["id"], overall_score=7,
+        dimensions=[{"name": "事实正确性", "score": 7, "comment": "答到两类方式"}],
+        strengths=["覆盖基础概念"], improvements=["补充混合持久化和取舍"],
+        evidence=[], reference_answer="RDB、AOF 与混合持久化。",
+    )
+    assert mock_interview.finish_session(session["id"])
+    mock_interview.save_session_report(
+        session_id=session["id"],
+        summary_markdown="## 整场总结\n基础概念覆盖较好，但需要补足持久化取舍。",
+        strengths=["基础概念覆盖较好"],
+        weaknesses=["持久化取舍表达不足"],
+        focus_areas=["Redis 持久化与恢复"],
+    )
+
+    with _client() as client:
+        resp = client.get(f"/api/mock-interview/sessions/{session['id']}/report/export")
+        assert resp.status_code == 200
+        assert "text/markdown" in resp.headers.get("content-type", "")
+        assert "filename*=UTF-8''" in resp.headers.get("content-disposition", "")
+        body = resp.content.decode("utf-8")
+        assert "ACME" in body
+        assert "Redis 持久化与恢复" in body
+        assert "整场总结" in body
+
+
+def test_export_session_report_409_when_not_generated(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+    session = mock_interview.create_session(role="后端", planned_question_count=1)
+
+    with _client() as client:
+        resp = client.get(f"/api/mock-interview/sessions/{session['id']}/report/export")
+        assert resp.status_code == 409
+

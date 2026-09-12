@@ -467,6 +467,8 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  mockInterviewExportReportUrl: (sessionId: number) =>
+    buildApiUrl(`/api/mock-interview/sessions/${sessionId}/report/export`),
 
   // Resume optimizer
   resumeOptimize: (jd: string) =>

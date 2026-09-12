@@ -13,6 +13,7 @@ const apiMock = vi.hoisted(() => ({
   mockInterviewSessions: vi.fn(),
   mockInterviewSession: vi.fn(),
   mockInterviewCreatePracticeSession: vi.fn(),
+  mockInterviewExportReportUrl: vi.fn((sessionId: number) => `/api/mock-interview/sessions/${sessionId}/report/export`),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -166,6 +167,9 @@ describe('MockInterview', () => {
     expect(screen.getAllByText(/基础概念覆盖较好/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/持久化取舍表达不足/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Redis 持久化与恢复/).length).toBeGreaterThan(0)
+    const exportLink = screen.getByRole('link', { name: '导出报告' })
+    expect(exportLink).toHaveAttribute('download')
+    expect(exportLink.getAttribute('href')).toContain('/api/mock-interview/sessions/7/report/export')
 
     let resolvePractice!: (value: any) => void
     apiMock.mockInterviewCreatePracticeSession.mockImplementationOnce(
