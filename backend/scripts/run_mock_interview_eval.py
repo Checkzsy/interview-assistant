@@ -1,4 +1,4 @@
-﻿"""模拟面试点评质量评测 CLI 样例集与 dry-run evaluator。
+"""模拟面试点评质量评测 CLI 样例集与 dry-run evaluator。
 
 真实 evaluator 可替换为 DeepSeek/OpenAI 兼容模型，对每条 case
 生成事实正确性、简历忠实度、schema 校验三维判断；dry-run 用于
@@ -8,8 +8,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from pathlib import Path
 from typing import Any, Callable
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from services.eval.llm_evaluator import build_llm_evaluator
 from services.eval.mock_interview_eval import run_eval
 
 SAMPLE_CASES: list[dict[str, Any]] = [
@@ -74,18 +81,24 @@ def build_dry_run_evaluator() -> Callable[[dict[str, Any]], dict[str, bool]]:
     return evaluator
 
 
+def build_real_evaluator() -> Callable[[dict[str, Any]], dict[str, bool]]:
+    """Evaluator backed by the configured review model (DeepSeek/OpenAI-compatible)."""
+    from services.mock_interview_llm import default_chat_json
+
+    return build_llm_evaluator(chat_json=default_chat_json)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="模拟面试点评质量评测")
     parser.add_argument("--dry-run", action="store_true", help="使用 dry-run evaluator，不调用真实模型")
     parser.add_argument("--out", default=None, help="输出报告 JSON 路径；不传则打印到 stdout")
     args = parser.parse_args()
 
-    evaluator = build_dry_run_evaluator() if args.dry_run else build_dry_run_evaluator()
+    evaluator = build_dry_run_evaluator() if args.dry_run else build_real_evaluator()
     report = run_eval(SAMPLE_CASES, evaluator)
     output = json.dumps(report, ensure_ascii=False, indent=2)
 
     if args.out:
-        from pathlib import Path
         Path(args.out).write_text(output, encoding="utf-8")
         print(f"[OK] report written to {args.out}")
     else:
