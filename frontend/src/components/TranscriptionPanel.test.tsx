@@ -10,6 +10,52 @@ function setScrollMetrics(el: HTMLElement, metrics: { scrollHeight: number; clie
   el.scrollTop = metrics.scrollTop
 }
 
+describe('TranscriptionPanel translation preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Element.prototype.scrollTo = vi.fn() as any
+    useInterviewStore.setState({
+      transcriptions: ['第一段'],
+      isRecording: true,
+      audioLevel: 0,
+      isTranscribing: false,
+      config: { written_exam_mode: false },
+      translations: {},
+      translationErrors: [],
+    } as any)
+  })
+
+  it('shows translations and failure markers only after the toggle is enabled', () => {
+    useInterviewStore.setState({
+      translations: { 1: '你好', 2: '世界' },
+      translationErrors: [3],
+    } as any)
+
+    render(<TranscriptionPanel />)
+
+    expect(screen.queryByText('纪要译文')).not.toBeInTheDocument()
+    expect(screen.queryByText('译文：你好')).not.toBeInTheDocument()
+    expect(screen.queryByText('翻译失败')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('switch', { name: '翻译' }))
+
+    expect(screen.getByText('纪要译文')).toBeInTheDocument()
+    expect(screen.getByText('译文：你好')).toBeInTheDocument()
+    expect(screen.getByText('译文：世界')).toBeInTheDocument()
+    expect(screen.getByText('翻译失败')).toBeInTheDocument()
+    expect(screen.getByText('部分翻译失败')).toBeInTheDocument()
+  })
+
+  it('shows an empty hint when the toggle is on but no translation data exists', () => {
+    render(<TranscriptionPanel />)
+
+    fireEvent.click(screen.getByRole('switch', { name: '翻译' }))
+
+    expect(screen.getByText('暂无译文')).toBeInTheDocument()
+    expect(screen.queryByText('部分翻译失败')).not.toBeInTheDocument()
+  })
+})
+
 describe('TranscriptionPanel auto-follow', () => {
   beforeEach(() => {
     vi.clearAllMocks()

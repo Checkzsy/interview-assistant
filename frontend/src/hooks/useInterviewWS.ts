@@ -121,6 +121,14 @@ export function useInterviewWS(active = true) {
       case 'transcription':
         s.addTranscription(msg.text as string)
         break
+      case 'transcription_translated':
+        // 契约：seq 需与后端 transcription 消息对齐；当前 transcription 消息不带 seq，
+        // translations 只按序匹配最后一条预期。
+        s.setTranslation(msg.seq as number, msg.text as string)
+        break
+      case 'transcription_translate_error':
+        s.markTranslationError(msg.seq as number)
+        break
       case 'candidate_transcription':
         s.addCandidateTranscription(msg.text as string, {
           segmentId: msg.segment_id as string | undefined,

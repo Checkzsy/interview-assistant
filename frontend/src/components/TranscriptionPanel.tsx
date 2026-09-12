@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, MicOff, Activity, Volume2, Radio, Languages, ClipboardPaste, Keyboard, Brain, ArrowDown } from 'lucide-react'
 import { useInterviewStore } from '@/stores/configStore'
+import { useShallow } from 'zustand/react/shallow'
+
+// 译文预览最多展示最近几条（store 侧保留最近 100 条）。
+const TRANSLATION_PREVIEW = 4
 
 export default function TranscriptionPanel() {
   const transcriptions = useInterviewStore((s) => s.transcriptions)
@@ -8,10 +12,17 @@ export default function TranscriptionPanel() {
   const audioLevel = useInterviewStore((s) => s.audioLevel)
   const isTranscribing = useInterviewStore((s) => s.isTranscribing)
   const config = useInterviewStore((s) => s.config)
+  // 契约：translations / translationErrors 的 key/条目是后端翻译消息携带的 seq。
+  // seq 需与后端 transcription 消息对齐；当前 transcription 消息不带 seq，
+  // translations 只按序匹配最后一条预期 —— 因此这里不依赖 transcriptions 数组索引，
+  // 仅在用户打开翻译开关后展示后端已返回的译文区块。
+  const translations = useInterviewStore(useShallow((s) => s.translations))
+  const translationErrors = useInterviewStore(useShallow((s) => s.translationErrors))
   const isExamMode = config?.written_exam_mode === true
   const contentRef = useRef<HTMLDivElement>(null)
   const autoFollowRef = useRef(true)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+  const [translateEnabled, setTranslateEnabled] = useState(false)
 
   const updateAutoFollow = useCallback(() => {
     const el = contentRef.current
@@ -42,6 +53,12 @@ export default function TranscriptionPanel() {
   }, [updateAutoFollow])
 
   const levelPercent = Math.min(audioLevel * 500, 100)
+  const translationKeys = Object.keys(translations)
+  const recentTranslations = translationKeys.slice(-TRANSLATION_PREVIEW).map((seq) => ({
+    seq: Number(seq),
+    text: translations[Number(seq)],
+  }))
+  const recentErrors = translationErrors.slice(-TRANSLATION_PREVIEW)
 
   return (
     <div className="flex flex-col h-full">
@@ -59,6 +76,24 @@ export default function TranscriptionPanel() {
             {isRecording ? (isExamMode ? '答题中' : '正在录音') : (isExamMode ? '答题记录' : '实时转录')}
           </span>
         </div>
+        {!isExamMode && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={translateEnabled}
+            aria-label="翻译"
+            title="打开后显示后端已返回的实时译文（seq 按消息顺序对齐最近转录）"
+            onClick={() => setTranslateEnabled((v) => !v)}
+            className={`ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium transition-colors ${
+              translateEnabled
+                ? 'border-accent-blue/45 bg-accent-blue/10 text-accent-blue'
+                : 'border-bg-hover/40 bg-bg-tertiary/40 text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            <Languages className="w-3 h-3" />
+            翻译
+          </button>
+        )}
         {isRecording && (
           <div className="flex items-center gap-2.5 ml-auto">
             {isTranscribing && (
@@ -155,6 +190,43 @@ export default function TranscriptionPanel() {
               {text}
             </div>
           ))
+        )}
+        {translateEnabled && (
+          <section
+            aria-label="纪要译文"
+            className="mt-2 rounded-lg border border-bg-hover/40 bg-bg-tertiary/25 p-3"
+          >
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary">
+              <Languages className="w-3 h-3 text-accent-blue/70" />
+              <span>纪要译文</span>
+              {translationKeys.length > 0 && (
+                <span className="font-mono text-[10px] text-text-muted">
+                  · {translationKeys.length}
+                </span>
+              )}
+            </div>
+            {translationKeys.length + translationErrors.length === 0 ? (
+              <p className="mt-1 text-xs text-text-muted">暂无译文</p>
+            ) : (
+              <ul className="mt-1.5 space-y-1">
+                {recentTranslations.map(({ seq, text }) => (
+                  <li key={seq} className="flex items-start gap-1.5 text-xs text-text-secondary">
+                    <span className="font-mono text-[10px] text-accent-amber/80 select-none whitespace-nowrap">#{seq}</span>
+                    <span className="min-w-0 break-all">译文：{text}</span>
+                  </li>
+                ))}
+                {recentErrors.map((seq) => (
+                  <li key={`err-${seq}`} className="flex items-start gap-1.5 text-xs text-accent-red/80">
+                    <span className="font-mono text-[10px] text-accent-red/60 select-none whitespace-nowrap">#{seq}</span>
+                    <span>翻译失败</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {translationErrors.length > 0 && (
+              <p className="mt-1.5 text-[10px] text-accent-red/80">部分翻译失败</p>
+            )}
+          </section>
         )}
         {showJumpToLatest && (
           <button

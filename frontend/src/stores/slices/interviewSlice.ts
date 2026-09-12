@@ -5,6 +5,7 @@ import type { QAPair, QAStatus } from './types'
 const CHUNK_THROTTLE_MS = 50
 const MAX_TRANSCRIPTIONS = 200
 const MAX_CANDIDATE_TRANSCRIPTIONS = 200
+const MAX_TRANSLATIONS = 100
 
 const _chunkBuffer: Map<string, { answer: string; think: string }> = new Map()
 let _chunkFlushTimer: ReturnType<typeof setTimeout> | null = null
@@ -12,6 +13,18 @@ let _candidateSegmentIds: Array<string | null> = []
 
 function takeTail<T>(items: T[], maxItems: number): T[] {
   return items.length > maxItems ? items.slice(-maxItems) : items
+}
+
+function removeOldestTail(map: Record<number, string>, maxEntries: number): Record<number, string> {
+  const keys = Object.keys(map)
+  const overflow = keys.length - maxEntries
+  if (overflow <= 0) return map
+  const dropped = new Set(keys.slice(0, overflow))
+  const next: Record<number, string> = {}
+  for (const k of keys.slice(overflow)) {
+    if (!dropped.has(k)) next[Number(k)] = map[Number(k)]
+  }
+  return next
 }
 
 function normalizeVisionVerify(raw: unknown): QAPair['visionVerify'] | undefined {
@@ -58,6 +71,8 @@ export interface InterviewSliceState {
   transcriptions: string[]
   candidateTranscriptions: string[]
   qaPairs: QAPair[]
+  translations: Record<number, string>
+  translationErrors: number[]
   streamingIds: string[]
   currentStreamingId: string | null
 }
@@ -69,6 +84,8 @@ export interface InterviewSliceActions {
   setTranscribing: (v: boolean) => void
   addTranscription: (text: string) => void
   addCandidateTranscription: (text: string, meta?: { segmentId?: string; isFinal?: boolean }) => void
+  setTranslation: (seq: number, text: string) => void
+  markTranslationError: (seq: number) => void
   startAnswer: (
     id: string,
     question: string,
@@ -102,6 +119,8 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
   transcriptions: [],
   candidateTranscriptions: [],
   qaPairs: [],
+  translations: {},
+  translationErrors: [],
   streamingIds: [],
   currentStreamingId: null,
 
@@ -133,6 +152,23 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
       candidateTranscriptions: overflow > 0
         ? nextTranscriptions.slice(overflow)
         : nextTranscriptions,
+    }
+  }),
+
+  setTranslation: (seq, text) => set((s) => {
+    const next = { ...s.translations }
+    next[seq] = text
+    return {
+      translations: removeOldestTail(next, MAX_TRANSLATIONS),
+      translationErrors: s.translationErrors.filter((x) => x !== seq),
+    }
+  }),
+  markTranslationError: (seq) => set((s) => {
+    const next = s.translationErrors.includes(seq)
+      ? s.translationErrors
+      : [...s.translationErrors, seq]
+    return {
+      translationErrors: takeTail(next, MAX_TRANSLATIONS),
     }
   }),
 
@@ -302,6 +338,8 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
     }
     set({
       transcriptions: takeTail(data.transcriptions ?? [], MAX_TRANSCRIPTIONS),
+      translations: {},
+      translationErrors: [],
       candidateTranscriptions: restoredCandidateTranscriptions,
       qaPairs: (data.qa_pairs ?? []).map(
         (qa: Partial<QAPair> & { id: string; question: string; answer: string }) => {
@@ -340,6 +378,8 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
       transcriptions: [],
       candidateTranscriptions: [],
       qaPairs: [],
+      translations: {},
+      translationErrors: [],
       currentStreamingId: null,
       streamingIds: [],
       isPaused: false,

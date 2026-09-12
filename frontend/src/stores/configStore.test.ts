@@ -161,6 +161,69 @@ describe('configStore toast queue', () => {
   })
 })
 
+
+describe('configStore translation state', () => {
+  // 契约：translations 的 key 是后端 transcription_translated 消息携带的 seq，
+  // 值为译文文本；translationErrors 记录翻译失败的 seq。
+  beforeEach(() => {
+    useInterviewStore.setState({
+      translations: {},
+      translationErrors: [],
+    } as any)
+  })
+
+  it('maps seq -> text and drops the seq from translation errors on success', () => {
+    const store = useInterviewStore.getState()
+
+    store.markTranslationError(3)
+    store.markTranslationError(7)
+    store.setTranslation(3, '你好')
+    store.setTranslation(7, '世界')
+
+    let state = useInterviewStore.getState()
+    expect(state.translations).toEqual({ 3: '你好', 7: '世界' })
+    expect(state.translationErrors).toEqual([])
+
+    store.markTranslationError(9)
+    state = useInterviewStore.getState()
+    expect(state.translationErrors).toEqual([9])
+    expect(state.translations).toEqual({ 3: '你好', 7: '世界' })
+  })
+
+  it('keeps translation errors bounded and idempotent', () => {
+    const store = useInterviewStore.getState()
+
+    for (let i = 0; i < 105; i += 1) {
+      store.markTranslationError(i)
+    }
+    store.markTranslationError(104)
+
+    const state = useInterviewStore.getState()
+    expect(state.translationErrors).toHaveLength(100)
+    expect(state.translationErrors[0]).toBe(5)
+    expect(state.translationErrors[99]).toBe(104)
+    expect(state.translationErrors.filter((x) => x === 104)).toHaveLength(1)
+  })
+
+  it('keeps only the most recent 100 translations and clears them with the session', () => {
+    const store = useInterviewStore.getState()
+
+    for (let i = 0; i < 105; i += 1) {
+      store.setTranslation(i, `text-${i}`)
+    }
+
+    let state = useInterviewStore.getState()
+    expect(Object.keys(state.translations)).toHaveLength(100)
+    expect(state.translations[5]).toBe('text-5')
+    expect(state.translations[104]).toBe('text-104')
+    expect(state.translations[4]).toBeUndefined()
+
+    state.clearSession()
+    state = useInterviewStore.getState()
+    expect(state.translations).toEqual({})
+    expect(state.translationErrors).toEqual([])
+  })
+})
 describe('configStore model health identity', () => {
   beforeEach(() => {
     useInterviewStore.setState({

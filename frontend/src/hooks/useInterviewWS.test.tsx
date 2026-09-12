@@ -155,6 +155,21 @@ describe('useInterviewWS', () => {
     ])
   })
 
+
+  it('maps transcription_translated and transcription_translate_error into store state', () => {
+    render(<Harness />)
+    const ws = FakeWebSocket.instances[0]
+
+    act(() => {
+      ws.emitOpen()
+      ws.emitMessage({ type: 'transcription_translated', seq: 12, text: '你好' })
+      ws.emitMessage({ type: 'transcription_translate_error', seq: 13 })
+    })
+
+    const state = useInterviewStore.getState()
+    expect(state.translations).toEqual({ 12: '你好' })
+    expect(state.translationErrors).toEqual([13])
+  })
   it('does not connect while inactive and connects after activation', () => {
     const { rerender } = render(<Harness active={false} />)
 
