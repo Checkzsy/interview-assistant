@@ -96,3 +96,7 @@ frontend/.last-run.json
 
 CODE_REVIEW.md
 .omx/
+# 对标样本安装包与临时文件（不入库）
+/exe/
+/pelican-bike.html
+/.research-artifacts/
