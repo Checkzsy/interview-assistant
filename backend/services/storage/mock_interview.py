@@ -190,8 +190,64 @@ def list_sessions(page: int = 1, page_size: int = 20) -> dict[str, Any]:
         item["answered_question_count"] = int(item.get("answered_question_count") or 0)
         item["reviewed_question_count"] = int(item.get("reviewed_question_count") or 0)
         item["average_score"] = round(float(item["average_score"]), 2) if item.get("average_score") is not None else None
+        if item.get("parent_session_id") is not None:
+            item["parent_summary"] = get_parent_summary(int(item["id"]))
         items.append(item)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+def _read_parent_summary(session_id: int) -> Optional[dict[str, Any]]:
+    """读取练习会话的父会话摘要；不递归调用 get_session_detail。
+
+    父会话分数按已点评题目平均（与 get_session_detail 的 average_score 口径一致）。
+    """
+    with _db_lock:
+        conn = _conn()
+        try:
+            child = conn.execute(
+                "SELECT parent_session_id FROM mock_interview_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            if not child or child["parent_session_id"] is None:
+                return None
+            parent = conn.execute(
+                "SELECT id, report_focus_areas_json, focus_areas_json FROM mock_interview_sessions WHERE id = ?",
+                (child["parent_session_id"],),
+            ).fetchone()
+            if not parent:
+                return None
+            average_row = conn.execute(
+                """
+                SELECT AVG(CASE WHEN q.status = 'reviewed' THEN q.overall_score END) AS avg_score
+                FROM mock_interview_questions AS q
+                WHERE q.session_id = ?
+                """,
+                (parent["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+
+    focus_raw = parent["report_focus_areas_json"] or parent["focus_areas_json"] or "[]"
+    try:
+        focus_areas = json.loads(focus_raw) if isinstance(focus_raw, str) else []
+    except (json.JSONDecodeError, TypeError):
+        focus_areas = []
+    if not isinstance(focus_areas, list):
+        focus_areas = []
+    avg = average_row["avg_score"]
+    return {
+        "id": parent["id"],
+        "average_score": round(float(avg), 2) if avg is not None else None,
+        "focus_areas": focus_areas,
+    }
+
+
+def get_parent_summary(session_id: int) -> Optional[dict[str, Any]]:
+    """练习会话的父会话摘要（进步对比）。
+
+    parent_summary 在主列表/详情接口直接注入；本函数单独暴露便于测试。
+    """
+    return _read_parent_summary(session_id)
 
 
 def get_question(question_id: int) -> Optional[dict[str, Any]]:
@@ -466,6 +522,8 @@ def get_session_detail(session_id: int) -> Optional[dict[str, Any]]:
     session["reviewed_question_count"] = sum(q["status"] == "reviewed" for q in questions)
     scores = [q["overall_score"] for q in questions if q["status"] == "reviewed" and q["overall_score"] is not None]
     session["average_score"] = round(sum(scores) / len(scores), 2) if scores else None
+    if session.get("parent_session_id") is not None:
+        session["parent_summary"] = _read_parent_summary(int(session["id"]))
     return session
 
 

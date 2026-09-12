@@ -425,4 +425,56 @@ describe('MockInterview session history', () => {
 
 
 
+  it('shows practice badge and progress tracking when resuming a practice session', async () => {
+    apiMock.mockInterviewSessions.mockResolvedValue({
+      items: [
+        {
+          id: 55,
+          status: 'completed',
+          company: 'ACME',
+          role: '后端开发',
+          language: '中文',
+          planned_question_count: 2,
+          question_count: 2,
+          answered_question_count: 2,
+          reviewed_question_count: 2,
+          average_score: 8.5,
+          parent_session_id: 9,
+          parent_summary: { id: 9, average_score: 7, focus_areas: ['Redis 持久化与恢复'] },
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    apiMock.mockInterviewSession.mockResolvedValue({
+      id: 55,
+      status: 'in_progress',
+      company: 'ACME',
+      role: '后端开发',
+      language: '中文',
+      planned_question_count: 2,
+      question_count: 1,
+      answered_question_count: 1,
+      reviewed_question_count: 0,
+      average_score: 8,
+      parent_session_id: 9,
+      parent_summary: { id: 9, average_score: 7, focus_areas: ['Redis 持久化与恢复'] },
+      questions: [],
+    })
+
+    render(<MockInterview />)
+
+    await waitFor(() =>
+      expect(screen.getByText('弱项复练')).toBeInTheDocument(),
+    )
+    await waitFor(() => expect(screen.getByText('均分 8.5')).toBeInTheDocument())
+
+    const resumeButton = await screen.findByRole('button', { name: /恢复 ACME 后端开发会话/ })
+    fireEvent.click(resumeButton)
+    await waitFor(() => expect(apiMock.mockInterviewSession).toHaveBeenCalledWith(55))
+    await waitFor(() => expect(screen.getByText('原始场次均分 7')).toBeInTheDocument())
+    expect(screen.getByText(/本次 8/)).toBeInTheDocument()
+    expect(screen.getByText(/进步追踪/)).toBeInTheDocument()
+  })
 })

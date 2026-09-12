@@ -350,9 +350,17 @@ export default function MockInterview() {
                       <span className="block truncate text-xs font-medium text-text-primary">
                         {item.company || '未命名公司'} · {item.role}
                       </span>
-                      <span className="mt-1 block text-[11px] text-text-muted">
-                        {item.question_count ?? 0}/{item.planned_question_count} 题 ·
-                        {item.status === 'completed' ? '已完成' : item.status === 'created' ? '待开始' : '进行中'}
+                      <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-muted">
+                        <span>
+                          {item.question_count ?? 0}/{item.planned_question_count} 题 ·
+                          {item.status === 'completed' ? '已完成' : item.status === 'created' ? '待开始' : '进行中'}
+                        </span>
+                        {item.average_score != null && <span>均分 {item.average_score}</span>}
+                        {item.parent_session_id != null && (
+                          <span className="rounded-full border border-accent-blue/35 bg-accent-blue/10 px-1.5 text-[10px] text-accent-blue">
+                            弱项复练
+                          </span>
+                        )}
                       </span>
                       {resumingSessionId === item.id && (
                         <span className="mt-1 block text-[11px] text-accent-blue">恢复中…</span>
@@ -369,6 +377,21 @@ export default function MockInterview() {
                 <div>
                   <h2 className="text-sm font-semibold text-text-primary">当前会话</h2>
                   <p className="mt-1 text-xs text-text-muted">{statusText}</p>
+                  {session?.parent_summary && (
+                    <div className="mt-2 rounded-lg border border-bg-hover bg-bg-tertiary/40 px-3 py-2 text-xs text-text-muted">
+                      <span className="font-medium text-text-secondary">进步追踪</span>
+                      <span className="mx-1">·</span>
+                      原始场次均分 {session.parent_summary.average_score ?? '—'}
+                      {session.average_score != null && (
+                        <span>
+                          {' '}→ 本次 {session.average_score}
+                          <span className={session.average_score > (session.parent_summary.average_score ?? -Infinity) ? ' text-accent-green' : ' text-accent-amber'}>
+                            {session.average_score >= (session.parent_summary.average_score ?? -Infinity) ? ' ↑' : ' ↓'}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button

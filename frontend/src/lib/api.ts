@@ -192,6 +192,11 @@ export interface MockInterviewSession {
   report_focus_areas?: string[]
   report_generated_at?: number | null
   questions?: MockInterviewQuestion[]
+  parent_summary?: {
+    id: number
+    average_score?: number | null
+    focus_areas: string[]
+  } | null
 }
 
 export interface MockInterviewFeedback {

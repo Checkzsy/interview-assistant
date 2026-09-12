@@ -328,3 +328,59 @@ def test_create_practice_session_normalizes_and_caps_focus_areas(tmp_path, monke
     assert len(practice["focus_areas"]) == 50
     assert len(set(practice["focus_areas"])) == 50
     assert practice["focus_areas"][0] == "重点-0"
+
+
+def test_practice_session_detail_and_list_carry_parent_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
+    mock_interview.init_db()
+
+    parent = mock_interview.create_session(
+        company="ACME",
+        role="后端开发",
+        language="中文",
+        jd_snapshot="负责高并发服务",
+        resume_snapshot="Python、Redis、FastAPI 项目经历",
+        planned_question_count=1,
+    )
+    q = mock_interview.add_question(session_id=parent["id"], seq=1, question_text="Redis 持久化有哪些方式？")
+    mock_interview.submit_answer(question_id=q["id"], answer_text="RDB 和 AOF。")
+    mock_interview.save_feedback(
+        question_id=q["id"],
+        overall_score=7,
+        dimensions=[{"name": "事实正确性", "score": 7, "comment": "答到两类方式"}],
+        strengths=["覆盖基础概念"],
+        improvements=["补充混合持久化和取舍"],
+        evidence=[],
+        reference_answer="RDB、AOF 与混合持久化。",
+    )
+    assert mock_interview.finish_session(parent["id"])
+    report = mock_interview.save_session_report(
+        session_id=parent["id"],
+        summary_markdown="## 整场总结",
+        strengths=["基础覆盖好"],
+        weaknesses=["缓存取舍不足"],
+        focus_areas=["Redis 持久化与恢复", "缓存场景取舍"],
+    )
+    assert report["status"] == "completed"
+
+    practice = mock_interview.create_practice_session(parent_session_id=parent["id"])
+    assert practice["parent_session_id"] == parent["id"]
+
+    # 详情带 parent_summary（父场次已完成并点评 -> average_score=7.0）
+    detail = mock_interview.get_session_detail(practice["id"])
+    assert detail is not None
+    assert detail["parent_summary"] == {
+        "id": parent["id"],
+        "average_score": 7.0,
+        "focus_areas": ["Redis 持久化与恢复", "缓存场景取舍"],
+    }
+
+    # 列表也带 parent_summary
+    listing = mock_interview.list_sessions(page_size=10)
+    practice_item = next(item for item in listing["items"] if item["id"] == practice["id"])
+    assert practice_item["parent_summary"] is not None
+    assert practice_item["parent_summary"]["id"] == parent["id"]
+    # 非练习会话没有 parent_summary
+    parent_item = next(item for item in listing["items"] if item["id"] == parent["id"])
+    assert parent_item.get("parent_summary") is None
+
