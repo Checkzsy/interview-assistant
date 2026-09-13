@@ -293,3 +293,11 @@ async def finish_session(session_id: int):
     if not mock_interview.finish_session(session_id):
         raise HTTPException(status_code=409, detail="会话未完成：仍有题目未回答或未点评")
     return {"ok": True, "status": "completed"}
+
+
+@router.delete("/mock-interview/sessions/{session_id}")
+async def delete_session(session_id: int):
+    """删除会话及其所有题目"""
+    if not mock_interview.delete_session(session_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"ok": True}

@@ -14,6 +14,7 @@ const apiMock = vi.hoisted(() => ({
   mockInterviewSession: vi.fn(),
   mockInterviewCreatePracticeSession: vi.fn(),
   mockInterviewExportReportUrl: vi.fn((sessionId: number) => `/api/mock-interview/sessions/${sessionId}/report/export`),
+  mockInterviewDeleteSession: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -480,5 +481,35 @@ describe('MockInterview session history', () => {
     await waitFor(() => expect(screen.getByText('原始场次均分 7')).toBeInTheDocument())
     expect(screen.getByText(/本次 8/)).toBeInTheDocument()
     expect(screen.getByText(/进步追踪/)).toBeInTheDocument()
+  })
+
+  it('deletes a session from history', async () => {
+    apiMock.mockInterviewSessions.mockResolvedValue({
+      items: [
+        {
+          id: 9,
+          status: 'in_progress',
+          company: 'ACME',
+          role: '后端开发',
+          language: '中文',
+          planned_question_count: 1,
+          question_count: 1,
+          answered_question_count: 1,
+          reviewed_question_count: 0,
+          average_score: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    apiMock.mockInterviewDeleteSession.mockResolvedValue({ ok: true })
+
+    render(<MockInterview />)
+
+    await waitFor(() => expect(screen.getByText('ACME · 后端开发')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /删除 ACME 后端开发会话/ }))
+    await waitFor(() => expect(apiMock.mockInterviewDeleteSession).toHaveBeenCalledWith(9))
+    await waitFor(() => expect(screen.queryByText('ACME · 后端开发')).not.toBeInTheDocument())
   })
 })

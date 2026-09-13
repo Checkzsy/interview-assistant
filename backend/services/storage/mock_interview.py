@@ -608,3 +608,21 @@ def finish_session(session_id: int) -> bool:
             return True
         finally:
             conn.close()
+
+
+def delete_session(session_id: int) -> bool:
+    """删除会话及其所有题目和回答"""
+    with _db_lock:
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM mock_interview_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM mock_interview_questions WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM mock_interview_sessions WHERE id = ?", (session_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()

@@ -30,6 +30,7 @@ export default function MockInterview() {
   const [creatingPractice, setCreatingPractice] = useState(false)
   const [sessions, setSessions] = useState<MockInterviewSession[]>([])
   const [resumingSessionId, setResumingSessionId] = useState<number | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -95,6 +96,27 @@ export default function MockInterview() {
       setResumingSessionId(null)
     }
   }
+
+  const handleDeleteSession = async (sessionId: number) => {
+    if (deletingSessionId !== null) return
+    setDeletingSessionId(sessionId)
+    setError(null)
+    try {
+      await api.mockInterviewDeleteSession(sessionId)
+      setSessions((prev) => prev.filter((item) => item.id !== sessionId))
+      if (session?.id === sessionId) {
+        setSession(null)
+        setQuestion(null)
+        setAnswer('')
+        setStatusText('准备中')
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, '删除失败'))
+    } finally {
+      setDeletingSessionId(null)
+    }
+  }
+
   const handleCreate = async () => {
     if (!role.trim() || creating) return
     setCreating(true)
@@ -365,6 +387,15 @@ export default function MockInterview() {
                       {resumingSessionId === item.id && (
                         <span className="mt-1 block text-[11px] text-accent-blue">恢复中…</span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除 ${item.company || '未命名公司'} ${item.role}会话`}
+                      onClick={() => handleDeleteSession(item.id)}
+                      disabled={deletingSessionId !== null}
+                      className="mt-1 w-full rounded-lg border border-accent-red/25 bg-accent-red/5 px-3 py-1 text-[11px] text-accent-red transition hover:bg-accent-red/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingSessionId === item.id ? '删除中' : '删除'}
                     </button>
                   </li>
                 ))}

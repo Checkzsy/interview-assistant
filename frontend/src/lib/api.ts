@@ -469,6 +469,8 @@ export const api = {
     }),
   mockInterviewExportReportUrl: (sessionId: number) =>
     buildApiUrl(`/api/mock-interview/sessions/${sessionId}/report/export`),
+  mockInterviewDeleteSession: (sessionId: number) =>
+    request<{ ok: boolean }>(`/api/mock-interview/sessions/${sessionId}`, { method: 'DELETE' }),
 
   // Resume optimizer
   resumeOptimize: (jd: string) =>
