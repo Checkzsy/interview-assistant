@@ -183,13 +183,13 @@ def test_export_session_report_409_when_not_generated(tmp_path, monkeypatch):
 def test_delete_session_endpoint_removes_and_404s(tmp_path, monkeypatch):
     monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
     mock_interview.init_db()
-    session = mock_interview.create_session(role="????", planned_question_count=1)
+    session = mock_interview.create_session(role="后端", planned_question_count=1)
 
     with _client() as client:
         resp = client.delete(f"/api/mock-interview/sessions/{session['id']}")
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
-        # ?????? 404
+        # 再次删除返回 404
         resp2 = client.delete(f"/api/mock-interview/sessions/{session['id']}")
         assert resp2.status_code == 404
 

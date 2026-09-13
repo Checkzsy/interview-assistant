@@ -389,13 +389,13 @@ def test_delete_session_removes_session_and_questions(tmp_path, monkeypatch):
     monkeypatch.setattr(mock_interview, "DB_PATH", str(tmp_path / "mock_interview.db"))
     mock_interview.init_db()
 
-    session = mock_interview.create_session(role="????", planned_question_count=1)
-    q = mock_interview.add_question(session_id=session["id"], seq=1, question_text="Redis ?????????")
-    mock_interview.submit_answer(question_id=q["id"], answer_text="RDB ? AOF?")
+    session = mock_interview.create_session(role="后端", planned_question_count=1)
+    q = mock_interview.add_question(session_id=session["id"], seq=1, question_text="Redis 持久化与恢复")
+    mock_interview.submit_answer(question_id=q["id"], answer_text="RDB 与 AOF 的区别")
 
     assert mock_interview.delete_session(session["id"]) is True
     assert mock_interview.get_session_detail(session["id"]) is None
     assert mock_interview.get_question(q["id"]) is None
-    # ?????? False
+    # 再次删除返回 False
     assert mock_interview.delete_session(session["id"]) is False
 
