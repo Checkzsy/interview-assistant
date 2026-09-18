@@ -8,7 +8,7 @@
     "start": "electron .",
     "dist": "npm run build:backend && electron-builder --win nsis --x64",
     "dist:dir": "npm run build:backend && electron-builder --win --x64 --dir",
-    "build:backend": "python -m PyInstaller --noconfirm --clean --name backend --paths \"%CD%\\..\\backend\" --add-data \"%CD%\\..\\backend\\assets;assets\" \"%CD%\\..\\backend\\entrypoint.py\" --exclude-module torch --exclude-module tensorflow --exclude-module pandas --exclude-module scipy --exclude-module matplotlib --exclude-module IPython --exclude-module jedi --exclude-module parso --exclude-module notebook --exclude-module jupyter --exclude-module jupyterlab --exclude-module tkinter --exclude-module PyQt5 --exclude-module PySide2 --exclude-module pytest --exclude-module PyInstaller --exclude-module black --exclude-module flake8 --exclude-module ruff --distpath build --workpath build/pyinstaller --specpath build"
+    "build:backend": "python -m PyInstaller --noconfirm --clean --name backend --paths \"%CD%\\..\\backend\" --add-data \"%CD%\\..\\backend\\assets;assets\" --collect-all faster_whisper --collect-submodules faster_whisper \"%CD%\\..\\backend\\entrypoint.py\" --exclude-module torch --exclude-module tensorflow --exclude-module pandas --exclude-module scipy --exclude-module matplotlib --exclude-module IPython --exclude-module jedi --exclude-module parso --exclude-module notebook --exclude-module jupyter --exclude-module jupyterlab --exclude-module tkinter --exclude-module PyQt5 --exclude-module PySide2 --exclude-module pytest --exclude-module PyInstaller --exclude-module black --exclude-module flake8 --exclude-module ruff --distpath build --workpath build/pyinstaller --specpath build"
   },
   "devDependencies": {
     "electron": "^41.3.0",
