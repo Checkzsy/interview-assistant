@@ -33,6 +33,11 @@ DEFAULT_READY_TIMEOUT_SEC = 180
 
 
 def _find_npm() -> str | None:
+    # On Windows prefer the .cmd wrapper: fnm and friends put an extensionless
+    # npm shim (a shell script) ahead of npm.cmd on PATH, which subprocess
+    # raises OSError [WinError 193] to execute. See start.py::_find_npm.
+    if os.name == "nt":
+        return shutil.which("npm.cmd") or shutil.which("npm")
     return shutil.which("npm") or shutil.which("npm.cmd")
 
 

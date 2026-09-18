@@ -142,12 +142,22 @@ def _print_dep_help():
 
 
 def _find_npx() -> Optional[str]:
-    """Return path to npx, or None if not found."""
-    return shutil.which("npx") or shutil.which("npx.cmd")
+    """Return path to npx, or None if not found.
+
+    On Windows, prefer the .cmd variant: package managers like fnm put an
+    extensionless shell script (npm/npx) ahead of npm.cmd/npx.cmd on PATH.
+    subprocess.CreateProcess cannot execute that extensionless shim and
+    raises OSError [WinError 193], so the .cmd wrapper must come first.
+    """
+    if platform.system() == "Windows":
+        return shutil.which("npx.cmd") or shutil.which("npx")
+    return shutil.which("npx")
 
 
 def _find_npm() -> Optional[str]:
-    return shutil.which("npm") or shutil.which("npm.cmd")
+    if platform.system() == "Windows":
+        return shutil.which("npm.cmd") or shutil.which("npm")
+    return shutil.which("npm")
 
 
 def _print_node_help():

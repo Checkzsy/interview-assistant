@@ -1,5 +1,21 @@
 # 修复日志
 
+## 2026-09-13 - 语音识别设备选择修复
+
+### 🐛 修复的问题
+
+#### 1. AMD/ROCm 环境下 Whisper 加载失败
+- **问题**：在 AMD GPU（如 Radeon RX 7800 XT）+ ROCm 版 torch 的机器上，语音识别（faster-whisper）加载模型报错 `CUDA driver version is insufficient for CUDA runtime version`，导致本地 ASR 完全不可用
+- **根因**：`STTEngine._best_device()` 用 `torch.cuda.is_available()` 判断设备。ROCm 版 torch 会把 AMD GPU 映射为 `cuda` 并返回 `True`，但 faster-whisper 底层的 ctranslate2 只支持真正的 NVIDIA CUDA，加载时必然失败
+- **解决方案**：改用 ctranslate2 自身的 `get_cuda_device_count()` 探测真实 CUDA 设备。ctranslate2 是真正加载模型的运行时，它知道 CUDA 是否可用。无真实 CUDA 设备时正确回退到 `cpu` + `int8`
+- **验证**：真实中文语音端到端转写成功（"请介绍一下你最近做过的项目"），40 个 STT 相关测试全部通过
+
+### 📝 修改的文件
+
+- **backend/services/stt/engines.py** (`_best_device`)
+  - 用 `ctranslate2.get_cuda_device_count()` 替代 `torch.cuda.is_available()` 判断设备
+  - 修复 AMD/ROCm 环境假阳性导致的模型加载失败
+
 ## 2026-06-23 - 面试复盘与启动优化
 
 ### 🐛 修复的问题

@@ -1,4 +1,6 @@
 @echo off
 chcp 65001 >nul
-python quick-start.py
+setlocal
+cd /d "%~dp0"
+python quick-start.py %*
 pause
