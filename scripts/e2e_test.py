@@ -22,7 +22,12 @@ def run_cmd(cmd: list, cwd: str = ROOT, timeout: int = 120) -> tuple[int, str]:
     import shutil
     exe = cmd[0]
     if exe == "npm":
-        exe = shutil.which("npm") or shutil.which("npm.cmd") or "npm"
+        # Prefer the .cmd wrapper on Windows: fnm's extensionless npm shim
+        # cannot be spawned via CreateProcess (WinError 193). See start.py.
+        if os.name == "nt":
+            exe = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+        else:
+            exe = shutil.which("npm") or shutil.which("npm.cmd") or "npm"
     cmd = [exe] + cmd[1:]
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     out = (p.stdout or "") + (p.stderr or "")

@@ -627,14 +627,17 @@ def _max_tokens_for_prompt(
     cfg,
     *,
     high_churn_short_answer: bool = False,
+    has_kb: bool = False,
 ) -> int:
     base_limit = max(1, int(getattr(cfg, "max_tokens", 4096) or 4096))
     if prompt_mode == PROMPT_MODE_ASR_REALTIME:
-        cap = (
-            int(getattr(cfg, "assist_realtime_high_churn_max_tokens", 420) or 420)
-            if high_churn_short_answer
-            else int(getattr(cfg, "assist_realtime_max_tokens", 900) or 900)
-        )
+        if high_churn_short_answer:
+            cap = int(getattr(cfg, "assist_realtime_high_churn_max_tokens", 420) or 420)
+        elif has_kb:
+            # 命中知识库参考资料时放宽输出上限，给出更完整的答案。
+            cap = int(getattr(cfg, "assist_realtime_kb_max_tokens", 1600) or 1600)
+        else:
+            cap = int(getattr(cfg, "assist_realtime_max_tokens", 900) or 900)
         return max(1, min(base_limit, cap))
     return base_limit
 
@@ -1028,6 +1031,7 @@ def process_question_parallel(
                 prompt_mode,
                 cfg,
                 high_churn_short_answer=high_churn_short_answer,
+                has_kb=bool(kb_hits),
             ),
         ):
             if deps.abort_check():

@@ -12,6 +12,10 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.logger import get_logger
+
+logger = get_logger("mock_interview_llm")
+
 
 class MockInterviewLLMError(RuntimeError):
     """Raised when the model output cannot be trusted as interview data."""
@@ -291,3 +295,48 @@ def generate_feedback(*, question: dict[str, Any], chat_json: ChatJson) -> dict[
         field = fields[0] if fields else "点评字段"
         raise _validation_error(field) from None
     return draft.model_dump()
+
+
+def generate_reference_answer(
+    question_text: str,
+    reference_points: str = "",
+    resume_text: str = "",
+) -> str:
+    """生成一道模拟面试题的示范回答（Markdown 字符串）。"""
+    from core.config import get_config
+    from services.llm.streaming import get_client_for_model
+
+    parts = [
+        "请针对下面这道模拟面试题，给出一份清晰、有深度的示范回答（Markdown）。",
+        "示范回答要与候选人原回答区分开，不要伪装成候选人说过的话。",
+    ]
+    if reference_points.strip():
+        parts.append(f"\n考察要点：\n{reference_points.strip()}")
+    if resume_text.strip():
+        parts.append(
+            "\n候选人背景（结合其真实项目经历组织回答，不要照搬简历原文）：\n"
+            + resume_text.strip()
+        )
+    parts.append(f"\n面试题：\n{question_text}")
+
+    cfg = get_config()
+    model = cfg.get_review_model()
+    if not model.api_key or model.api_key in ("", "sk-your-api-key-here"):
+        raise MockInterviewLLMError("模拟面试模型未配置有效 API Key。")
+
+    client = get_client_for_model(model)
+    try:
+        response = client.chat.completions.create(
+            model=model.model,
+            messages=[
+                {"role": "system", "content": "你是一位资深的面试官，擅长给出清晰、有深度的示范回答。"},
+                {"role": "user", "content": "\n".join(parts)},
+            ],
+            temperature=0.5,
+            max_tokens=1600,
+        )
+        content = response.choices[0].message.content or ""
+        return content.strip()
+    except Exception as exc:
+        logger.error("generate_reference_answer failed: %s", exc, exc_info=True)
+        raise MockInterviewLLMError(f"参考答案生成失败: {str(exc)[:120]}") from exc

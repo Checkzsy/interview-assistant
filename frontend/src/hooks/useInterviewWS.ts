@@ -120,6 +120,11 @@ export function useInterviewWS(active = true) {
         break
       case 'transcription':
         s.addTranscription(msg.text as string)
+        s.setTranscriptionPartial(null)
+        break
+      case 'transcription_partial':
+        // 豆包流式部分结果：说话中实时上屏，段结束后由 transcription 清空。
+        s.setTranscriptionPartial(msg.text as string | null)
         break
       case 'transcription_translated':
         // 契约：seq 需与后端 transcription 消息对齐；当前 transcription 消息不带 seq，

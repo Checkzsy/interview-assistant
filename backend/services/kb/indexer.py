@@ -176,6 +176,56 @@ def embed_doc_chunks(doc_id: int, chunk_ids: list[int]) -> None:
         _log.warning("kb indexer embedding skipped doc_id=%s: %s", doc_id, exc)
 
 
+def get_doc_preview(rel_path: str, max_chars: int = 600, max_chunks: int = 3) -> dict[str, Any]:
+    """文档预览：前 max_chunks 个 chunk 拼接，截断到 max_chars。"""
+    store = _get_store()
+    doc = store.get_doc(rel_path)
+    if doc is None:
+        return {"path": rel_path, "found": False}
+    chunks = store.get_doc_chunks(rel_path, limit=max_chunks)
+    parts: list[str] = []
+    total = 0
+    for c in chunks:
+        text = (c.get("text") or "").strip()
+        if not text:
+            continue
+        if total >= max_chars:
+            break
+        remaining = max_chars - total
+        if len(text) > remaining:
+            text = text[:remaining] + "…"
+        parts.append(text)
+        total += len(text)
+    return {
+        "path": rel_path,
+        "title": doc.get("title"),
+        "found": True,
+        "chunk_count": doc.get("chunk_count", 0),
+        "preview": "\n\n".join(parts),
+    }
+
+
+def get_doc_full_text(rel_path: str) -> dict[str, Any]:
+    """文档全文：按 chunk 顺序拼接全部文本。"""
+    store = _get_store()
+    doc = store.get_doc(rel_path)
+    if doc is None:
+        return {"path": rel_path, "found": False}
+    chunks = store.get_doc_chunks(rel_path, limit=9999)
+    parts: list[str] = []
+    for c in chunks:
+        text = (c.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return {
+        "path": rel_path,
+        "title": doc.get("title"),
+        "found": True,
+        "chunk_count": doc.get("chunk_count", 0),
+        "full_text": "\n\n".join(parts),
+    }
+
+
 def reindex_file(rel_path: str) -> dict[str, Any]:
     """按相对路径重建单文件索引；文件不存在时删除记录。"""
     cfg = get_config()
@@ -207,4 +257,6 @@ __all__ = [
     "reindex_file",
     "remove_file",
     "resolve_path",
+    "get_doc_preview",
+    "get_doc_full_text",
 ]

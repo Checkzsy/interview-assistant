@@ -1316,6 +1316,25 @@ def _interview_worker():
     _reset_pending_asr_group()
     pause_flushed = False
 
+    # 豆包双向流式状态：说话开始即建会话边采边发，部分结果实时上屏。
+    # 仅引擎提供 create_streaming_session 时启用（豆包 wss；whisper/HTTP 不可流式）。
+    streaming_factory = getattr(engine, "create_streaming_session", None)
+    streaming = None
+
+    def _streaming_on_partial(text: str) -> None:
+        if text:
+            broadcast({"type": "transcription_partial", "text": text})
+
+    def _cancel_streaming() -> None:
+        nonlocal streaming
+        if streaming is not None:
+            try:
+                streaming.finish(timeout=0.5)
+            except Exception:
+                pass
+            streaming = None
+        broadcast({"type": "transcription_partial", "text": ""})
+
     # gc.collect() 之前直接放在主 ASR 循环里 (每 60s 同步执行),
     # 大堆下单次 50~500ms, 期间无法读音频可能丢块。改成独立 daemon 线程,
     # 主循环零阻塞; 线程靠 _stop_event 退出, 与 worker 生命周期对齐。
@@ -1353,6 +1372,7 @@ def _interview_worker():
     try:
         while not _stop_event.is_set():
             if _pause_event.is_set():
+                _cancel_streaming()
                 if not pause_flushed:
                     _refresh_interviewer_raw_drop_count(runtime)
                     _drain_remaining_interviewer_audio_chunks(runtime, vad, cfg, session)
@@ -1414,7 +1434,34 @@ def _interview_worker():
                     sub_ended_mono = batch_start_mono + (offset_samples / AudioCapture.SAMPLE_RATE)
                     speech_audio = vad.feed(vad_chunk)
                     if speech_audio is None:
+                        if streaming_factory is not None and getattr(vad, "last_flush_reason", None) is None:
+                            # 仍在说话中：边采边发（豆包流式），部分结果实时上屏。
+                            try:
+                                if streaming is None:
+                                    streaming = streaming_factory(on_partial=_streaming_on_partial)
+                                    if streaming is not None:
+                                        _elog.info("doubao streaming session started")
+                                if streaming is not None:
+                                    streaming.feed(vad_chunk)
+                            except Exception as e:
+                                _elog.warning("doubao streaming feed failed: %s", e)
+                                streaming = None
                         continue
+                    # 段结束：收尾流式会话，拿最终文本作为本段上屏的一部分。
+                    if streaming is not None:
+                        try:
+                            final_text = streaming.finish()
+                            if final_text and final_text.strip():
+                                pub = transcription_for_publish(
+                                    postprocess_interview_transcription(final_text),
+                                    getattr(cfg, "transcription_min_sig_chars", 2),
+                                )
+                                if pub:
+                                    _append_transcription_fragment(cfg, session, pub, time.monotonic(), False)
+                        except Exception as e:
+                            _elog.warning("doubao streaming finish failed: %s", e)
+                        streaming = None
+                        broadcast({"type": "transcription_partial", "text": ""})
                     flush_reason = getattr(vad, "last_flush_reason", None) or "silence"
                     segment_ended_mono = sub_ended_mono
                     segment_started_mono = max(
@@ -1456,6 +1503,7 @@ def _interview_worker():
             get_session().is_recording = False
         broadcast({"type": "recording", "value": False})
     finally:
+        _cancel_streaming()
         # 保证 worker 任何退出路径 (正常 / 异常 / 早退) 都释放音频设备。
         # AudioCapture.stop 是幂等的: 即使外部 stop_interview_loop 已经先调过,
         # 重复调用也是 no-op (内部用 _lock + _running 标志位防御)。

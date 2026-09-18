@@ -172,6 +172,8 @@ class AppConfig(BaseModel):
     assist_realtime_max_tokens: int = 720
     # 高 churn 短答模式的更严格 token 上限。
     assist_realtime_high_churn_max_tokens: int = 320
+    # 命中知识库参考资料时的输出 token 上限（放宽，给出更完整的答案）。
+    assist_realtime_kb_max_tokens: int = 1600
     # stop 时等待 answer worker 收尾的最长时间；压测 interviewer 转写链路时可设为 0。
     assist_stop_answer_wait_sec: float = 3.0
     # stop 时等待面试官 ASR segment worker 清空队列的最长时间；本地 Whisper 需要更宽裕。

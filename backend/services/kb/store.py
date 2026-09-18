@@ -140,6 +140,19 @@ class KBStore:
             row = conn.execute("SELECT * FROM kb_doc WHERE path=?", (path,)).fetchone()
         return dict(row) if row else None
 
+    def get_doc_chunks(self, path: str, limit: int = 5) -> list[dict[str, Any]]:
+        """按顺序取文档的 chunk 文本（预览/全文用）。"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT id FROM kb_doc WHERE path=?", (path,)).fetchone()
+            if row is None:
+                return []
+            rows = conn.execute(
+                "SELECT section_path, text, page, origin FROM kb_chunk "
+                "WHERE doc_id=? ORDER BY ord LIMIT ?",
+                (row["id"], limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_docs(self, limit: Optional[int] = None) -> list[dict[str, Any]]:
         sql = (
             "SELECT d.*, "

@@ -141,14 +141,16 @@ class DoubaoSTT:
         app_id: str = "",
         access_token: str = "",
         api_key: str = "",
-        resource_id: str = "volc.seedasr.sauc.duration",
+        resource_id: str = "volc.bigasr.sauc.duration",
         boosting_table_id: str = "",
+        ws_url: str = "",
     ):
         self.app_id = app_id or ""
         self.access_token = access_token or ""
         self.api_key = api_key or ""
         self.resource_id = resource_id or "volc.bigasr.sauc.duration"
         self.boosting_table_id = boosting_table_id or ""
+        self.ws_url = (ws_url or DOUBAO_ASR_WS_URL).rstrip("/")
 
     @property
     def model_size(self) -> str:
@@ -169,18 +171,22 @@ class DoubaoSTT:
         pass
 
     def _build_headers(self) -> dict:
+        # 双向流式接口（bigmodel_async）要求 X-Api-Request-Id + X-Api-Sequence(-1)，
+        # 旧版控制台鉴权仍用 X-Api-App-Key + X-Api-Access-Key。
         if self.api_key:
             return {
                 "X-Api-Key": self.api_key,
                 "X-Api-Resource-Id": self.resource_id,
-                "X-Api-Connect-Id": str(uuid.uuid4()),
+                "X-Api-Request-Id": uuid.uuid4().hex,
+                "X-Api-Sequence": "-1",
             }
         app_key = self.app_id or self.access_token
         return {
             "X-Api-App-Key": app_key,
             "X-Api-Access-Key": self.access_token,
             "X-Api-Resource-Id": self.resource_id,
-            "X-Api-Connect-Id": str(uuid.uuid4()),
+            "X-Api-Request-Id": uuid.uuid4().hex,
+            "X-Api-Sequence": "-1",
         }
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
@@ -262,6 +268,173 @@ class DoubaoSTT:
             if "websocket" in str(type(e).__name__).lower():
                 raise RuntimeError(f"豆包 ASR 连接异常: {e}") from e
             raise
+
+    def create_streaming_session(
+        self,
+        on_partial: Optional[Any] = None,
+        on_final: Optional[Any] = None,
+    ) -> Optional["DoubaoStreamingSession"]:
+        """创建双向流式会话（边说边发，实时返回部分结果）。
+
+        仅 wss 协议支持；返回 None 表示当前引擎不可流式（HTTP 等）。
+        """
+        if not self.api_key and not self.access_token:
+            return None
+        if websocket is None:
+            return None
+        app_key = self.app_id or self.access_token or self.api_key
+        first_frame = _build_ws_frame_full_request(
+            app_key, self.boosting_table_id, language="zh-CN"
+        )
+        return DoubaoStreamingSession(
+            ws_url=self.ws_url,
+            headers=self._build_headers(),
+            first_frame=first_frame,
+            on_partial=on_partial,
+            on_final=on_final,
+        )
+
+
+class DoubaoStreamingSession:
+    """豆包双向流式会话：主线程边采边发，后台线程收部分/最终结果。
+
+    - ``feed(audio)``：主循环调用，喂 float32/int16 音频，内部累积到 200ms 块再发。
+    - ``finish()``：发结束帧，阻塞等待最终结果（definite:true）并返回文本。
+    - ``on_partial(text)`` / ``on_final(text)``：收到结果时的回调。
+    """
+
+    def __init__(
+        self,
+        ws_url: str,
+        headers: dict,
+        first_frame: bytes,
+        on_partial: Optional[Any] = None,
+        on_final: Optional[Any] = None,
+    ):
+        self._on_partial = on_partial
+        self._on_final = on_final
+        self._final_text = ""
+        self._done = threading.Event()
+        self._opened = threading.Event()
+        self._buf = bytearray()
+        self._chunk_bytes = CHUNK_SAMPLES * 2  # int16 每样本 2 字节
+
+        self._ws = websocket.WebSocketApp(
+            ws_url,
+            header=[f"{k}: {v}" for k, v in headers.items()],
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        self._recv_thread = threading.Thread(
+            target=self._ws.run_forever, daemon=True
+        )
+        self._recv_thread.start()
+        if not self._opened.wait(timeout=10):
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            raise RuntimeError("豆包流式连接建立超时")
+        self._send(first_frame)
+
+    # ------------------------------------------------------------------
+    # WebSocket 回调（recv 线程内执行）
+    # ------------------------------------------------------------------
+
+    def _on_open(self, _ws) -> None:
+        _log.info("doubao streaming on_open")
+        self._opened.set()
+
+    def _on_message(self, _ws, message) -> None:
+        try:
+            raw = message if isinstance(message, bytes) else message.encode("utf-8")
+            msg_type, payload = _parse_ws_response(raw)
+        except Exception:
+            return
+        if msg_type == MSG_ERROR:
+            _log.warning("doubao streaming on_message MSG_ERROR")
+            self._done.set()
+            return
+        if msg_type != MSG_FULL_SERVER_RESPONSE or not payload:
+            _log.info("doubao streaming on_message skip msg_type=%s payload=%s", msg_type, payload is not None)
+            return
+        result = payload.get("result") or {}
+        text = (result.get("text") or "").strip()
+        if not text:
+            return
+        utterances = result.get("utterances") or []
+        is_final = any(
+            isinstance(u, dict) and u.get("definite") for u in utterances
+        )
+        _log.info(
+            "doubao streaming result text=%r definite=%s is_last=%s",
+            text[:60],
+            [u.get("definite") for u in utterances if isinstance(u, dict)],
+            payload.get("is_last_package"),
+        )
+        if is_final:
+            self._final_text = text
+            self._done.set()
+            if self._on_final:
+                try:
+                    self._on_final(text)
+                except Exception as e:
+                    _log.warning("doubao streaming on_final failed: %s", e)
+        elif self._on_partial:
+            try:
+                self._on_partial(text)
+            except Exception as e:
+                _log.warning("doubao streaming on_partial failed: %s", e)
+
+    def _on_error(self, _ws, error) -> None:
+        _log.warning("doubao streaming on_error: %r", error)
+        self._done.set()
+
+    def _on_close(self, _ws, *_args) -> None:
+        _log.warning("doubao streaming on_close: code=%s reason=%s", _args[0] if _args else None, _args[1] if len(_args) > 1 else None)
+        self._done.set()
+
+    # ------------------------------------------------------------------
+    # 主循环调用（音频采集线程）
+    # ------------------------------------------------------------------
+
+    def _send(self, frame: bytes) -> None:
+        self._ws.send(frame, opcode=websocket.ABNF.OPCODE_BINARY)
+
+    def feed(self, audio: np.ndarray) -> None:
+        """喂一段音频，累积到 200ms 块再发送。"""
+        if self._done.is_set():
+            return
+        pcm = _audio_to_pcm_int16(audio)
+        self._buf.extend(pcm.tobytes())
+        while len(self._buf) >= self._chunk_bytes:
+            chunk = bytes(self._buf[: self._chunk_bytes])
+            del self._buf[: self._chunk_bytes]
+            try:
+                self._send(_build_ws_frame_audio(chunk, is_last=False))
+            except Exception as e:
+                _log.warning("doubao streaming feed failed: %s", e)
+                self._done.set()
+                return
+
+    def finish(self, timeout: float = 8.0) -> str:
+        """发结束帧并阻塞等待最终结果，返回最终文本（可能为空串）。"""
+        if not self._done.is_set():
+            try:
+                if self._buf:
+                    self._send(_build_ws_frame_audio(bytes(self._buf), is_last=False))
+                    self._buf = bytearray()
+                self._send(_build_ws_frame_audio(b"", is_last=True))
+            except Exception as e:
+                _log.warning("doubao streaming finish send failed: %s", e)
+        self._done.wait(timeout=timeout)
+        try:
+            self._ws.close()
+        except Exception:
+            pass
+        return _postprocess(self._final_text) if self._final_text else ""
 
 
 # ---------------------------------------------------------------------------
@@ -376,11 +549,16 @@ class STTEngine:
 
     @staticmethod
     def _best_device() -> tuple[str, str]:
+        # Torch can report a CUDA backend that faster-whisper/ctranslate2
+        # cannot actually use (e.g. ROCm/HIP builds on AMD GPUs, or CUDA-less
+        # wheels where torch.cuda.is_available() lies). Trust ctranslate2's own
+        # device probe instead: it is the runtime that will actually load the
+        # model, and it knows the truth about real CUDA devices.
         try:
-            import torch
-            if torch.cuda.is_available():
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
                 return "cuda", "float16"
-        except ImportError:
+        except Exception:
             pass
         return "cpu", "int8"
 

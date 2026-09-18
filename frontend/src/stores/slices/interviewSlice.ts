@@ -69,6 +69,7 @@ export interface InterviewSliceState {
   audioLevel: number
   isTranscribing: boolean
   transcriptions: string[]
+  transcriptionPartial: string
   candidateTranscriptions: string[]
   qaPairs: QAPair[]
   translations: Record<number, string>
@@ -83,6 +84,7 @@ export interface InterviewSliceActions {
   setAudioLevel: (v: number) => void
   setTranscribing: (v: boolean) => void
   addTranscription: (text: string) => void
+  setTranscriptionPartial: (text: string | null) => void
   addCandidateTranscription: (text: string, meta?: { segmentId?: string; isFinal?: boolean }) => void
   setTranslation: (seq: number, text: string) => void
   markTranslationError: (seq: number) => void
@@ -117,6 +119,7 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
   audioLevel: 0,
   isTranscribing: false,
   transcriptions: [],
+  transcriptionPartial: '',
   candidateTranscriptions: [],
   qaPairs: [],
   translations: {},
@@ -131,6 +134,8 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
   addTranscription: (text) => set((s) => ({
     transcriptions: takeTail([...s.transcriptions, text], MAX_TRANSCRIPTIONS),
   })),
+  // 豆包流式部分结果：null/空清空（段结束/取消），否则覆盖显示当前正在说的话。
+  setTranscriptionPartial: (text) => set({ transcriptionPartial: text || '' }),
   addCandidateTranscription: (text, meta) => set((s) => {
     const segmentId = meta?.segmentId || null
     if (segmentId) {
@@ -376,6 +381,7 @@ export const createInterviewSlice: StateCreator<RootState, [], [], InterviewSlic
     }
     set({
       transcriptions: [],
+      transcriptionPartial: '',
       candidateTranscriptions: [],
       qaPairs: [],
       translations: {},

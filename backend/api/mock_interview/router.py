@@ -208,6 +208,28 @@ async def generate_feedback(question_id: int):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/mock-interview/sessions/{session_id}/questions/{question_id}/reference-answer")
+async def reference_answer(session_id: int, question_id: int):
+    """生成一道模拟面试题的示范回答（Markdown 文本）。"""
+    question = mock_interview.get_question(question_id)
+    if not question or int(question["session_id"]) != session_id:
+        raise HTTPException(status_code=404, detail="模拟面试题目不存在")
+
+    session = mock_interview.get_session(session_id)
+    try:
+        skill_tags = question.get("skill_tags") or []
+        answer_markdown = await run_in_threadpool(
+            mock_interview_llm.generate_reference_answer,
+            question["question_text"],
+            "、".join(str(t) for t in skill_tags) if isinstance(skill_tags, list) else str(skill_tags or ""),
+            (session or {}).get("resume_snapshot") or "",
+        )
+    except Exception as exc:
+        raise _llm_http_error(exc) from exc
+
+    return {"answer_markdown": answer_markdown}
+
+
 @router.post("/mock-interview/sessions/{session_id}/report")
 async def generate_session_report_endpoint(session_id: int):
     detail = mock_interview.get_session_detail(session_id)

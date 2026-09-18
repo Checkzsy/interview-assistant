@@ -79,6 +79,18 @@ async def kb_docs(limit: Optional[int] = None) -> dict:
     return {"items": items}
 
 
+@router.get("/kb/docs/{path}/preview")
+async def kb_doc_preview(path: str) -> dict:
+    info = await _run_kb_low_priority(indexer.get_doc_preview, path)
+    return info
+
+
+@router.get("/kb/docs/{path}/full")
+async def kb_doc_full(path: str) -> dict:
+    info = await _run_kb_low_priority(indexer.get_doc_full_text, path)
+    return info
+
+
 @router.post("/kb/search")
 async def kb_search(req: SearchReq) -> dict:
     cfg = get_config()

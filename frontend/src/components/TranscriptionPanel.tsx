@@ -8,6 +8,7 @@ const TRANSLATION_PREVIEW = 4
 
 export default function TranscriptionPanel() {
   const transcriptions = useInterviewStore((s) => s.transcriptions)
+  const transcriptionPartial = useInterviewStore((s) => s.transcriptionPartial)
   const isRecording = useInterviewStore((s) => s.isRecording)
   const audioLevel = useInterviewStore((s) => s.audioLevel)
   const isTranscribing = useInterviewStore((s) => s.isTranscribing)
@@ -46,7 +47,7 @@ export default function TranscriptionPanel() {
       return
     }
     requestAnimationFrame(() => scrollToLatest('auto'))
-  }, [scrollToLatest, transcriptions])
+  }, [scrollToLatest, transcriptions, transcriptionPartial])
 
   useEffect(() => {
     updateAutoFollow()
@@ -190,6 +191,15 @@ export default function TranscriptionPanel() {
               {text}
             </div>
           ))
+        )}
+        {transcriptionPartial && (
+          <div
+            className="px-3.5 py-2.5 rounded-lg border border-accent-blue/30 bg-accent-blue/5 text-sm leading-relaxed text-text-secondary italic"
+            aria-label="正在说话（实时部分结果）"
+          >
+            <span className="text-accent-blue/70 font-mono mr-1.5 text-[10px] select-none not-italic">{String(transcriptions.length + 1).padStart(2, '0')}</span>
+            {transcriptionPartial}
+          </div>
         )}
         {translateEnabled && (
           <section
