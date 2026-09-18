@@ -91,10 +91,10 @@ https://github.com/user-attachments/assets/1013b772-c59d-4ec4-8256-f932caa8ea3c
 
 | 模块 | 现在能做什么 |
 | --- | --- |
-| **实时辅助** | ASR 转写 → 问题识别 → 多模型回答 → 截图审题 / 知识库引用 |
-| **知识库** | 上传 `.md` / `.txt` / `.log` / `.docx` / `.pdf`，支持检索测试、最近命中和回答引用 |
+| **实时辅助** | ASR 转写 → 问题识别 → 多模型回答 → 截图审题 / 知识库引用；豆包双向流式 ASR 边说边出实时上屏 |
+| **知识库** | 上传 `.md` / `.txt` / `.log` / `.docx` / `.pdf`，支持检索测试、文档预览 / 全文阅读、最近命中和回答引用 |
 | **面试复盘** | 录制真实问答、ASR 纠错、逐题分析、整场总结 |
-| **模拟面试** | 基于岗位 / JD / 简历快照出题，支持文字回答、分维度点评、证据、参考答案、整场报告、练习重点、历史会话恢复与弱项复练 |
+| **模拟面试** | 基于岗位 / JD / 简历快照出题（可注入知识库上下文），支持文字 / WAV 语音回答、分维度点评、证据、参考答案、整场报告导出 Markdown、练习重点、历史会话恢复与弱项复练 |
 | **能力分析** | 知识点标签、历史问答记录、薄弱点趋势 |
 | **简历优化** | 上传简历，对照 JD 给出优化建议和改写方向 |
 | **求职看板** | 表格 / Kanban、状态标签、拖拽排序、Offer 对比 |
@@ -157,7 +157,7 @@ sequenceDiagram
 ### 2. 安装依赖
 
 ```bash
-git clone https://github.com/powAu3/interview-assistant.git
+git clone https://github.com/Checkzsy/interview-assistant.git
 cd interview-assistant
 
 pip install -r backend/requirements.txt
@@ -179,22 +179,35 @@ cp backend/config.example.json backend/config.json
 参考文档：
 
 - [配置说明](docs/配置说明.md)
+- [使用说明](docs/使用说明.md)
 - [API 密钥与模型](docs/API密钥与模型.md)
 - [音频配置](docs/音频配置.md)
 - [豆包语音识别](docs/豆包语音识别.md)
 
 ### 4. 启动应用
 
+Windows 下最简单的方式：
+
+```bat
+启动.bat
+```
+
+双击即可——脚本会自动定位项目目录、安装依赖并拉起桌面应用，命令行窗口在加载完成后自动隐藏。
+
+命令行方式：
+
 ```bash
-python start.py                 # 桌面模式（推荐）
+python quick-start.py           # 一键启动：装依赖 + 桌面模式（推荐）
+python start.py                 # 桌面模式（Electron 窗口）
 python start.py --mode network  # 浏览器模式，默认 http://localhost:18080
 ```
 
 补充说明：
 
 - 首次启动如果前端尚未构建，`start.py` 会自动安装并构建前端，因此本机仍需要 Node.js。
-- `python quick-start.py` 适合已经构建过前端、想快速打开桌面模式的场景。
+- `python quick-start.py --skip-install` 适合已经构建过前端、想快速打开桌面模式的场景。
 - 只想在浏览器里体验时，可直接用 `--mode network`。
+- **AMD 显卡（ROCm）用户**：本地 Whisper 的设备探测已按 ctranslate2 实际支持情况修正，无需额外配置；如遇 STT 加载异常，确认 faster-whisper / ctranslate2 已正确安装即可。
 
 ## 打包 Windows 安装包
 
@@ -279,7 +292,8 @@ interview-assistant/
 
 ## 常见问题
 
-- **Node / npm 报错**：请确认 Node.js 版本为 `18+`。
+- **Node / npm 报错**：请确认 Node.js 版本为 `18+`；Windows 下若用 fnm 管理 Node，脚本已自动优先使用 `npm.cmd` / `npx.cmd`（规避 `WinError 193`）。
+- **双击 启动.bat 无反应**：确认双击后弹出的控制台内容；若提示找不到 python，请将 Python 加入 PATH 后重试。
 - **Electron 下载慢**：可先设置 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`，再进入 `desktop/` 执行 `npm install`。
 - **macOS 下 sounddevice 安装失败**：先执行 `brew install portaudio`。
 - **Whisper 模型下载慢**：可设置 `export HF_ENDPOINT=https://hf-mirror.com`。
