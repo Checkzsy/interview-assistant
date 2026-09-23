@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { api } from '@/lib/api'
+import { api, getErrorMessage } from '@/lib/api'
 import { useInterviewStore } from '@/stores/configStore'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 import { RefreshCw, Trash2, ChevronDown, ChevronUp, Target, TrendingUp, TrendingDown, Minus, Sparkles, Mic, BookOpen, Loader2, AlertCircle } from 'lucide-react'
@@ -111,12 +111,6 @@ function TrendIcon({ trend }: { trend: string }) {
   if (trend === 'up') return <TrendingUp className="w-3 h-3 text-accent-green" />
   if (trend === 'down') return <TrendingDown className="w-3 h-3 text-accent-red" />
   return <Minus className="w-3 h-3 text-text-muted" />
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === 'string' && error.trim()) return error
-  return fallback
 }
 
 export default function KnowledgeMap() {

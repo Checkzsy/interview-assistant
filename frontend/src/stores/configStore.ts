@@ -6,6 +6,8 @@ import { createUiSlice } from './slices/uiSlice'
 import { createResumeOptSlice } from './slices/resumeOptSlice'
 import type { RootState } from './slices/rootState'
 
+export type { RootState }
+
 export type {
   AppConfig,
   ModelInfo,
@@ -20,7 +22,6 @@ export type {
   SettingsDrawerTab,
   ModelHealthStatus,
 } from './slices/types'
-export type { RootState } from './slices/rootState'
 
 /**
  * 全量 store。结构由 5 个 slice 组合而成（位于 ./slices/）：

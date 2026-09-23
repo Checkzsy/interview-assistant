@@ -6,12 +6,10 @@ import json
 import math
 import os
 import secrets
-
-from core.logger import get_logger
-
-logger = get_logger(__name__)
 import shutil
 import threading
+
+from core.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,3 +1,4 @@
+import { attachPreflightWebSocket, formatLatency, isRecord, normalizeStatusSteps, type StepState, type StepStatus } from '@/lib/preflightSteps'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   AudioWaveform,
@@ -17,20 +18,6 @@ import {
 import { api } from '@/lib/api'
 import { useInterviewStore } from '@/stores/configStore'
 import { buildWsUrl } from '@/lib/backendUrl'
-
-type StepStatus = 'idle' | 'running' | 'pass' | 'fail' | 'warn' | 'skip'
-
-interface StepState {
-  status: StepStatus
-  detail: string
-  answer?: string
-  question?: string
-  transcript?: string
-  expected_phrase?: string
-  first_token_ms?: number
-  total_ms?: number
-  model_name?: string
-}
 
 interface Scenario {
   id: string
@@ -73,23 +60,6 @@ function statusColor(status: StepStatus): string {
     case 'warn': return 'border-accent-amber/30 bg-accent-amber/5'
     default: return 'border-bg-hover/50 bg-transparent'
   }
-}
-
-function formatLatency(ms?: number): string | null {
-  if (typeof ms !== 'number' || !Number.isFinite(ms)) return null
-  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function normalizeStatusSteps(value: unknown): Record<string, Partial<StepState>> {
-  if (!isRecord(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value).filter(([, step]) => isRecord(step)),
-  ) as Record<string, Partial<StepState>>
 }
 
 export default function SoundTest() {
@@ -168,18 +138,7 @@ export default function SoundTest() {
 
   useEffect(() => {
     const ws = new WebSocket(buildWsUrl('/ws'))
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (msg?.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong' }))
-          return
-        }
-      } catch {
-        /* malformed frames are ignored by the component message parser */
-      }
-      handleMessage(event)
-    }
+    attachPreflightWebSocket(ws, handleMessage)
     return () => { ws.close() }
   }, [handleMessage])
 

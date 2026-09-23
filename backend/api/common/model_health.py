@@ -179,12 +179,13 @@ def _store_model_health(
 ) -> bool:
     """Store a result only while the index still owns the probed model."""
 
-    if not _fingerprint_is_current(index, fingerprint):
+    current = _current_model_fingerprint(index)
+    if not fingerprint or current != fingerprint:
         return False
     with _model_health_lock:
         # Recheck after taking the state lock so a concurrent config save
         # cannot leave a stale result attached to a reused array index.
-        if not _fingerprint_is_current(index, fingerprint):
+        if _current_model_fingerprint(index) != fingerprint:
             return False
         _model_health[index] = status
         _model_health_detail[index] = detail
@@ -195,10 +196,11 @@ def _store_model_health(
 
 def get_model_health(index: int) -> Optional[str]:
     fingerprint = _current_model_fingerprint(index)
+    if not fingerprint:
+        return None
     with _model_health_lock:
         if (
-            not fingerprint
-            or not _fingerprint_is_current(index, fingerprint)
+            _current_model_fingerprint(index) != fingerprint
             or _model_health_fingerprint.get(index) != fingerprint
         ):
             _clear_model_health(index)

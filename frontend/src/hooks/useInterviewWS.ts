@@ -102,6 +102,8 @@ export function useInterviewWS(active = true) {
 
   const handleMessage = (msg: WsMsg) => {
     const s = useInterviewStore.getState()
+    // 笔试预检产生的 answer_* 事件只服务预检面板，不进主界面状态
+    if (msg.type.startsWith('answer_') && (msg as { exam_preflight_id?: string }).exam_preflight_id) return
     switch (msg.type) {
       case 'init':
         s.setInitData(msg as Parameters<typeof s.setInitData>[0])
@@ -144,23 +146,19 @@ export function useInterviewWS(active = true) {
         s.clearSession()
         break
       case 'answer_start':
-        if (msg.exam_preflight_id) return
-        s.startAnswer(msg.id as string, msg.question as string, {
+          s.startAnswer(msg.id as string, msg.question as string, {
           source: msg.source as string,
           modelName: msg.model_name as string,
         })
         break
       case 'answer_think_chunk':
-        if (msg.exam_preflight_id) return
-        s.appendThinkChunk(msg.id as string, msg.chunk as string)
+          s.appendThinkChunk(msg.id as string, msg.chunk as string)
         break
       case 'answer_chunk':
-        if (msg.exam_preflight_id) return
-        s.appendAnswerChunk(msg.id as string, msg.chunk as string)
+          s.appendAnswerChunk(msg.id as string, msg.chunk as string)
         break
       case 'answer_done':
-        if (msg.exam_preflight_id) return
-        s.finalizeAnswer(
+          s.finalizeAnswer(
           msg.id as string,
           msg.question as string,
           msg.answer as string,
@@ -171,12 +169,10 @@ export function useInterviewWS(active = true) {
         )
         break
       case 'answer_cancelled':
-        if (msg.exam_preflight_id) return
-        s.cancelAnswer(msg.id as string)
+          s.cancelAnswer(msg.id as string)
         break
       case 'answer_error':
-        if (msg.exam_preflight_id) return
-        {
+          {
           const message = (msg.message as string) || '答案处理失败'
           const prefix = msg.stage === 'persistence' ? '答案保存失败' : '答案生成失败'
           s.errorAnswer(msg.id as string, message)

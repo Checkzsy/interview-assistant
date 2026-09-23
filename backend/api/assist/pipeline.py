@@ -1,6 +1,5 @@
 """Interview assist pipeline: ASR buffering, task dispatch, parallel answer workers."""
 
-import copy
 import gc
 import numpy as np
 import queue
@@ -9,6 +8,8 @@ import threading
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable, Literal, Optional
+
+import copy
 
 from core.background import BoundedTaskWorker
 from core.config import get_config
@@ -31,7 +32,6 @@ from api.realtime.ws import broadcast
 from api.assist.answer_worker import (
     AnswerWorkerDeps,
     process_question_parallel,
-    prompt_mode_for_task as answer_prompt_mode_for_task,
     prompt_server_screen_code,
 )
 from api.assist.asr_state import (
@@ -43,17 +43,13 @@ from api.assist.scheduler import (
     TaskPayload,
     begin_asr_turn as scheduler_begin_asr_turn,
     claim_next_dispatch,
-    dispatch_model_order as scheduler_dispatch_model_order,
     dispatch_snapshot as scheduler_dispatch_snapshot,
     drain_commit_queue,
     is_asr_task,
     is_stale_inflight_asr_task,
-    key_ok,
     max_parallel_slots as scheduler_max_parallel_slots,
-    model_eligible as scheduler_model_eligible,
     physical_busy_models as scheduler_physical_busy_models,
     pick_model_index as scheduler_pick_model_index,
-    priority_model_index as scheduler_priority_model_index,
     task_meta,
 )
 
@@ -177,7 +173,7 @@ def _is_high_churn_asr_submission(cfg, now_mono: float) -> bool:
     with _dispatch_lock:
         _prune_recent_asr_turns_locked(now_mono)
         has_active_asr = any(
-            _is_asr_task(task) and not _is_stale_inflight_asr_task(task)
+            is_asr_task(task) and not _is_stale_inflight_asr_task(task)
             for _model_idx, task in _in_flight_tasks.values()
         )
         has_recent_turn = bool(_recent_asr_turn_monos)
@@ -198,18 +194,6 @@ def _asr_confirm_window_sec(cfg) -> float:
 def _asr_group_max_wait_sec(cfg) -> float:
     max_wait = float(getattr(cfg, "assist_asr_group_max_wait_sec", 1.2) or 0.0)
     return max(0.2, min(8.0, max_wait))
-
-
-def _asr_interrupt_running(cfg) -> bool:
-    return asr_interrupt_running(cfg)
-
-
-def _task_meta(task: TaskPayload) -> dict[str, Any]:
-    return task_meta(task)
-
-
-def _is_asr_task(task: TaskPayload) -> bool:
-    return is_asr_task(task)
 
 
 def _get_latest_asr_turn_id() -> int:
@@ -587,26 +571,6 @@ def _submit_candidate_knowledge_update(qa_id: str, candidate_answer: str) -> boo
 # Model dispatch
 # ---------------------------------------------------------------------------
 
-def _key_ok(m) -> bool:
-    return key_ok(m)
-
-
-def _model_eligible(i: int, m, need_vision: bool) -> bool:
-    return scheduler_model_eligible(i, m, need_vision, get_model_health)
-
-
-def _prompt_mode_for_task(source: str, manual_input: bool, written_exam: bool = False):
-    return answer_prompt_mode_for_task(source, manual_input, written_exam=written_exam)
-
-
-def _priority_model_index(cfg) -> int:
-    return scheduler_priority_model_index(cfg)
-
-
-def _dispatch_model_order(cfg) -> list[int]:
-    return scheduler_dispatch_model_order(cfg)
-
-
 def _dispatch_snapshot_locked() -> tuple[set[int], int]:
     return scheduler_dispatch_snapshot(_in_flight_tasks, _latest_asr_turn_id)
 
@@ -703,7 +667,7 @@ def submit_answer_task(task: TaskPayload) -> bool:
         _next_submit_seq += 1
         tv = _task_session_version
         _pending.append((task, seq, tv))
-        delay = max(0.0, float(_task_meta(task).get("dispatch_after_mono", 0.0) or 0.0) - time.monotonic())
+        delay = max(0.0, float(task_meta(task).get("dispatch_after_mono", 0.0) or 0.0) - time.monotonic())
     _try_dispatch()
     if delay > 0:
         timer = threading.Timer(delay, _try_dispatch)
@@ -739,7 +703,7 @@ def _append_late_asr_constraint_tail(text: str, source: str, now_mono: float) ->
         for idx in range(len(_pending) - 1, -1, -1):
             task, seq, session_version = _pending[idx]
             question, image, manual_input, task_source, meta = task
-            if not _is_asr_task(task) or task_source != source:
+            if not is_asr_task(task) or task_source != source:
                 continue
             grace_until = float(meta.get("asr_tail_grace_until_mono", 0.0) or 0.0)
             if grace_until and now_mono > grace_until:
@@ -831,8 +795,10 @@ def _try_dispatch():
                     # update_config() replaces the global object while a
                     # worker may be queued; copying only the model used to
                     # let written-exam/KB/token settings drift underneath it.
-                    config_snapshot = copy.deepcopy(cfg)
-                    model_cfg_snapshot = copy.deepcopy(config_snapshot.models[selected_idx])
+                    config_snapshot = (
+                        cfg.model_copy(deep=True) if hasattr(cfg, "model_copy") else copy.deepcopy(cfg)
+                    )
+                    model_cfg_snapshot = config_snapshot.models[selected_idx]
         if step.skipped_seq is not None:
             _mark_seq_skipped(step.skipped_seq)
             continue
@@ -1407,20 +1373,26 @@ def _interview_worker():
             now = time.monotonic()
             _refresh_interviewer_raw_drop_count(runtime)
             # H4: 将 flush 逻辑移到独立线程，避免阻塞音频采集
-            try:
-                _flush_queue.put_nowait((get_config(), session, now))
-            except queue.Full:
-                pass  # 如果队列满，跳过本次 flush
+            # 无未 flush 状态时跳过入队，避免空转信号每 tick 抢 _asr_state_lock
+            if _asr_state.has_pending_flush_state():
+                try:
+                    _flush_queue.put_nowait((get_config(), session, now))
+                except queue.Full:
+                    pass  # 如果队列满，跳过本次 flush
 
             chunks = audio_capture.drain_audio_chunks(timeout=0.1, max_chunks=6)
             if not chunks:
                 time.sleep(0.05)
                 continue
-            energy = AudioCapture.compute_energy(np.concatenate(chunks))
+            total_samples = sum(len(chunk) for chunk in chunks)
+            # RMS 增量累加：免掉整批 chunk 的 concatenate memcpy（可达数百 KB/tick）
+            total_sq = 0.0
+            for chunk in chunks:
+                total_sq += float(np.sum(chunk ** 2, dtype=np.float64))
+            energy = (total_sq / total_samples) ** 0.5 if total_samples else 0.0
             broadcast({"type": "audio_level", "value": round(energy, 4)})
 
             offset_samples = 0
-            total_samples = sum(len(chunk) for chunk in chunks)
             batch_end_mono = now
             batch_start_mono = max(0.0, batch_end_mono - (total_samples / AudioCapture.SAMPLE_RATE))
             _log_interviewer_chunk_gap(
@@ -1922,7 +1894,7 @@ def _process_question_parallel(
 ):
     cfg = config_snapshot if config_snapshot is not None else get_config()
     my_gen = _capture_generation()
-    my_asr_turn = int(_task_meta(task).get("asr_turn_id", 0)) if _is_asr_task(task) else 0
+    my_asr_turn = int(task_meta(task).get("asr_turn_id", 0)) if is_asr_task(task) else 0
 
     def session_stale() -> bool:
         return sess_v != _task_session_version
@@ -1933,10 +1905,12 @@ def _process_question_parallel(
         if my_gen != _answer_generation:
             return True
         if (
-            _is_asr_task(task)
-            and _should_interrupt_stale_asr(cfg)
+            is_asr_task(task)
             and my_asr_turn
+            # 便宜的 turn-id 比较先短路：常见情形（无新 ASR turn）直接返回，
+            # 避免每个 stream chunk 都跑昂贵的并行槽位/模型健康检查
             and my_asr_turn < _get_latest_asr_turn_id()
+            and _should_interrupt_stale_asr(cfg)
         ):
             return True
         return False

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { buildOverlayStatePayload } from '@/lib/interviewOverlay'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 
 export function useOverlayWindowSync(_isRecording: boolean, _appMode: string) {
@@ -25,17 +26,19 @@ export function useOverlayWindowSync(_isRecording: boolean, _appMode: string) {
     overlaySyncUntilRef.current = Date.now() + 500
 
     const payload: Record<string, unknown> = {
+      ...buildOverlayStatePayload({
+        interviewOverlayOpacity,
+        interviewOverlayFontSize,
+        interviewOverlayFontColor,
+        interviewOverlayShowBg,
+        interviewOverlayMode,
+        interviewOverlayFocusWidthPct,
+        interviewOverlayFocusHeightPct,
+        interviewOverlayPromptMaxWidth,
+        interviewOverlayPromptAutoFollow,
+        interviewOverlayMaxLines,
+      }),
       enabled: interviewOverlayEnabled,
-      opacity: interviewOverlayOpacity,
-      fontSize: interviewOverlayFontSize,
-      fontColor: interviewOverlayFontColor,
-      showBg: interviewOverlayShowBg,
-      mode: interviewOverlayMode,
-      focusWidthPct: interviewOverlayFocusWidthPct,
-      focusHeightPct: interviewOverlayFocusHeightPct,
-      promptMaxWidth: interviewOverlayPromptMaxWidth,
-      promptAutoFollow: interviewOverlayPromptAutoFollow,
-      maxLines: interviewOverlayMaxLines,
     }
 
     // enabled OFF → force hide overlay + show main window

@@ -149,24 +149,37 @@ function keepWindowInFront(win) {
   }, FRONT_REASSERT_INTERVAL);
 }
 
+// Overlay 窗口的视觉不变量：content protection + 透明背景。
+// 各事件时机重复调用是幂等的，统一从这里走，新增不变量只改这一处。
+function applyOverlayVisuals(win) {
+  if (!win || win.isDestroyed()) return;
+  win.setContentProtection(true);
+  win.setBackgroundColor('#00000000');
+}
+
 function getOverlayStateFilePath() {
   return path.join(app.getPath('userData'), 'overlay-window.json');
 }
 
+// overlay-window.json 只会被本进程读写：载入一次驻内存，写盘时同步失效，避免每次 resize/move 重复同步 I/O。
+let _overlayStateCache = null;
+
 function loadOverlayWindowState() {
+  if (_overlayStateCache) return _overlayStateCache;
   try {
     const raw = fs.readFileSync(getOverlayStateFilePath(), 'utf8');
     const data = JSON.parse(raw);
-    if (data && typeof data === 'object') return data;
+    _overlayStateCache = (data && typeof data === 'object') ? data : { positions: {} };
   } catch {
-    /* ignore */
+    _overlayStateCache = { positions: {} };
   }
-  return { positions: {} };
+  return _overlayStateCache;
 }
 
 function saveOverlayWindowState(data) {
   try {
     fs.writeFileSync(getOverlayStateFilePath(), JSON.stringify(data, null, 2), 'utf8');
+    _overlayStateCache = data;
   } catch (error) {
     console.warn('saveOverlayWindowState failed:', error);
   }
@@ -230,8 +243,9 @@ function getFocusOverlayBounds() {
 }
 
 function getNormalOverlayBounds(mode) {
-  const storedPos = getStoredOverlayPosition();
+  // getStoredOverlayPosition 内部已载入状态，这里复用同一份缓存
   const saved = loadOverlayWindowState();
+  const storedPos = getStoredOverlayPosition();
   const storedSize = saved?.position;
   const minOverlayWidth = OVERLAY_PRESET.minWidth || OVERLAY_PRESET.width;
   const minOverlayHeight = OVERLAY_PRESET.minHeight || OVERLAY_PRESET.height;
@@ -439,8 +453,7 @@ function createOverlayWindow() {
 
   // Content protection 必须尽早调用 —— 等到 ready-to-show 时,
   // 窗口可能已经被 window server 登记过一次, 导致 NSWindowSharingNone 漏掉初始帧
-  overlayWindow.setContentProtection(true);
-  overlayWindow.setBackgroundColor('#00000000');
+  applyOverlayVisuals(overlayWindow);
   overlayWindow.setAlwaysOnTop(true, 'screen-saver', FRONT_REASSERT_LEVEL);
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   if (process.platform === 'darwin') {
@@ -455,16 +468,14 @@ function createOverlayWindow() {
 
   overlayWindow.once('ready-to-show', () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    overlayWindow.setContentProtection(true);
-    overlayWindow.setBackgroundColor('#00000000');
+    applyOverlayVisuals(overlayWindow);
     overlayWindow.setFocusable(false);
     overlayWindow.setAlwaysOnTop(true, 'screen-saver', FRONT_REASSERT_LEVEL);
   });
   overlayWindow.loadURL(`${SERVER_URL}?overlay=1`);
   overlayWindow.webContents.on('did-finish-load', () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    overlayWindow.setContentProtection(true);
-    overlayWindow.setBackgroundColor('#00000000');
+    applyOverlayVisuals(overlayWindow);
     overlayWindow.setFocusable(false);
     if (lastOverlayState) {
       overlayWindow.webContents.send('overlay-state', lastOverlayState);
@@ -479,8 +490,7 @@ function createOverlayWindow() {
   });
   overlayWindow.on('show', () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    overlayWindow.setContentProtection(true);
-    overlayWindow.setBackgroundColor('#00000000');
+    applyOverlayVisuals(overlayWindow);
     overlayWindow.setFocusable(false);
   });
 
@@ -538,7 +548,7 @@ function showOverlayWindow() {
   } else {
     overlayWindow.show();
   }
-  overlayWindow.setContentProtection(true);
+  applyOverlayVisuals(overlayWindow);
   keepWindowInFront(overlayWindow);
 }
 
@@ -565,69 +575,65 @@ function notifyDesktopToast(message, level = 'info') {
 
 function notifyConfigUpdated(config) {
   if (config && typeof config === 'object') {
+    refreshMultiScreenIdleSecCache(config);
     notifyMainWindow('config-updated', config);
   }
 }
 
-function postBackend(pathname, body = '{}') {
+function backendRequest(method, pathname, body) {
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      `${SERVER_URL}${pathname}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-        },
-      },
-      (res) => {
-        let raw = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => { raw += chunk; });
-        res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-            if (!raw) { resolve({ ok: true }); return; }
-            try { resolve(JSON.parse(raw)); } catch { resolve({ ok: true }); }
-            return;
-          }
-          reject(new Error(raw || res.statusMessage || `HTTP ${res.statusCode}`));
-        });
-      }
-    );
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-function getBackend(pathname) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(`${SERVER_URL}${pathname}`, { method: 'GET' }, (res) => {
+    const options = { method };
+    if (body !== undefined) {
+      options.headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      };
+    }
+    const req = http.request(`${SERVER_URL}${pathname}`, options, (res) => {
       let raw = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => { raw += chunk; });
       res.on('end', () => {
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          if (!raw) { resolve({}); return; }
-          try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+          if (!raw) { resolve(method === 'POST' ? { ok: true } : {}); return; }
+          try { resolve(JSON.parse(raw)); } catch { resolve(method === 'POST' ? { ok: true } : {}); }
           return;
         }
         reject(new Error(raw || res.statusMessage || `HTTP ${res.statusCode}`));
       });
     });
     req.on('error', reject);
+    if (body !== undefined) req.write(body);
     req.end();
   });
 }
 
+function postBackend(pathname, body = '{}') {
+  return backendRequest('POST', pathname, body);
+}
+
+function getBackend(pathname) {
+  return backendRequest('GET', pathname);
+}
+
+// multi_screen_capture_idle_sec 只在设置保存时变化：缓存标量，config-updated 时刷新，
+// 避免每次多屏截图都发一次 /api/config 往返。
+let _multiScreenIdleSecMs = null;
+
+function refreshMultiScreenIdleSecCache(cfg) {
+  const sec = Number(cfg?.multi_screen_capture_idle_sec ?? 10);
+  _multiScreenIdleSecMs = Math.max(1, Math.min(60, Number.isFinite(sec) ? sec : 10)) * 1000;
+}
+
 async function getMultiScreenIdleMs() {
+  if (_multiScreenIdleSecMs !== null) return _multiScreenIdleSecMs;
   try {
     const cfg = await getBackend('/api/config');
-    const sec = Number(cfg?.multi_screen_capture_idle_sec ?? 10);
-    return Math.max(1, Math.min(60, Number.isFinite(sec) ? sec : 10)) * 1000;
+    refreshMultiScreenIdleSecCache(cfg);
   } catch {
-    return 10000;
+    _multiScreenIdleSecMs = 10000;
   }
+  return _multiScreenIdleSecMs;
 }
 
 const multiServerScreenBatch = createMultiScreenBatch({
@@ -742,16 +748,7 @@ function unregisterAllManagedShortcuts() {
 }
 
 function syncFocusOverlayShortcuts() {
-  for (const action of FOCUS_OVERLAY_SHORTCUT_ACTIONS) {
-    const shortcut = shortcuts[action];
-    if (!shortcut) continue;
-    if (isOverlayShortcutActive(action)) {
-      if (shortcut.status !== ShortcutStatus.Registered) registerManagedShortcut(shortcut);
-    } else if (shortcut.status === ShortcutStatus.Registered || shortcut.status === ShortcutStatus.Failed) {
-      unregisterShortcut(action);
-    }
-  }
-  for (const action of VISIBLE_OVERLAY_SHORTCUT_ACTIONS) {
+  for (const action of [...FOCUS_OVERLAY_SHORTCUT_ACTIONS, ...VISIBLE_OVERLAY_SHORTCUT_ACTIONS]) {
     const shortcut = shortcuts[action];
     if (!shortcut) continue;
     if (isOverlayShortcutActive(action)) {

@@ -20,6 +20,36 @@ export interface OverlayStatePayload {
   maxLines: number
 }
 
+/** 从 uiPrefsStore 的字段值构建 syncOverlayWindow payload（11 项 overlay 偏好）。
+ *  Three call sites (ControlBar / examOverlay / useOverlayWindowSync) previously
+ *  hand-built this literal; any new overlay pref now only changes here. */
+export function buildOverlayStatePayload(prefs: {
+  interviewOverlayOpacity: number
+  interviewOverlayFontSize: number
+  interviewOverlayFontColor: string
+  interviewOverlayShowBg: boolean
+  interviewOverlayMode: OverlayMode
+  interviewOverlayFocusWidthPct: number
+  interviewOverlayFocusHeightPct: number
+  interviewOverlayPromptMaxWidth: number
+  interviewOverlayPromptAutoFollow: boolean
+  interviewOverlayMaxLines: number
+}): OverlayStatePayload {
+  return {
+    enabled: true,
+    opacity: prefs.interviewOverlayOpacity,
+    fontSize: prefs.interviewOverlayFontSize,
+    fontColor: prefs.interviewOverlayFontColor,
+    showBg: prefs.interviewOverlayShowBg,
+    mode: prefs.interviewOverlayMode,
+    focusWidthPct: prefs.interviewOverlayFocusWidthPct,
+    focusHeightPct: prefs.interviewOverlayFocusHeightPct,
+    promptMaxWidth: prefs.interviewOverlayPromptMaxWidth,
+    promptAutoFollow: prefs.interviewOverlayPromptAutoFollow,
+    maxLines: prefs.interviewOverlayMaxLines,
+  }
+}
+
 export const INTERVIEW_OVERLAY_STORAGE_KEYS = {
   enabled: 'ia_overlay_enabled',
   opacity: 'ia_overlay_opacity',

@@ -1,3 +1,4 @@
+import { buildOverlayStatePayload } from '@/lib/interviewOverlay'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Play,
@@ -298,18 +299,8 @@ export default function ControlBar() {
       const s = useUiPrefsStore.getState()
       if (s.interviewOverlayEnabled && window.electronAPI?.syncOverlayWindow) {
         window.electronAPI.syncOverlayWindow({
-          enabled: true,
+          ...buildOverlayStatePayload(s),
           visible: true,
-          opacity: s.interviewOverlayOpacity,
-          fontSize: s.interviewOverlayFontSize,
-          fontColor: s.interviewOverlayFontColor,
-          showBg: s.interviewOverlayShowBg,
-          mode: s.interviewOverlayMode,
-          focusWidthPct: s.interviewOverlayFocusWidthPct,
-          focusHeightPct: s.interviewOverlayFocusHeightPct,
-          promptMaxWidth: s.interviewOverlayPromptMaxWidth,
-          promptAutoFollow: s.interviewOverlayPromptAutoFollow,
-          maxLines: s.interviewOverlayMaxLines,
         }).catch(() => {})
       }
     }

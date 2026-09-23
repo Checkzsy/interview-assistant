@@ -1,3 +1,4 @@
+import { buildOverlayStatePayload } from '@/lib/interviewOverlay'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 
 export function prepareExamOverlayPrompt() {
@@ -10,17 +11,9 @@ export function showExamOverlayPrompt() {
   prepareExamOverlayPrompt()
   const next = useUiPrefsStore.getState()
   window.electronAPI?.syncOverlayWindow?.({
-    enabled: true,
+    ...buildOverlayStatePayload(next),
     visible: true,
-    opacity: next.interviewOverlayOpacity,
-    fontSize: next.interviewOverlayFontSize,
-    fontColor: next.interviewOverlayFontColor,
     showBg: false,
     mode: 'prompt',
-    focusWidthPct: next.interviewOverlayFocusWidthPct,
-    focusHeightPct: next.interviewOverlayFocusHeightPct,
-    promptMaxWidth: next.interviewOverlayPromptMaxWidth,
-    promptAutoFollow: next.interviewOverlayPromptAutoFollow,
-    maxLines: next.interviewOverlayMaxLines,
   }).catch(() => {})
 }

@@ -53,6 +53,15 @@ class AssistAsrStateMachine:
         self.pending_group: Optional[PendingASRGroup] = None
         self.next_transcription_seq = 0
 
+    def has_pending_flush_state(self) -> bool:
+        """Lock-free hint: any unflushed merge buffer or pending question group.
+
+        读取方在入队 flush 信号前先看这个标志；为 False 时常见情形直接跳过，
+        避免录音主循环每个 tick 都入队 + 抢 _asr_state_lock。允许轻微竞态：
+        状态在检查后才写入时，下个 tick 会补上（flush 信号每 0.1s 一次）。
+        """
+        return bool(self.merge_parts) or self.pending_group is not None
+
     def reset_merge_buffer(self):
         self.merge_parts = []
         self.merge_mono_first = None

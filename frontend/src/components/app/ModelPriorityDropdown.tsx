@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
-import { api } from '@/lib/api'
+import { api, getErrorMessage } from '@/lib/api'
 import { useInterviewStore, type AppConfig, type ModelHealthStatus } from '@/stores/configStore'
 
 interface ModelPriorityDropdownProps {
@@ -53,10 +53,6 @@ function enabledModelIndexes(config: AppConfig) {
     .map(({ index }) => index)
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : typeof error === 'string' ? error : '健康检查失败'
-}
-
 export function ModelPriorityDropdown({
   config,
   modelHealth,
@@ -106,7 +102,7 @@ export function ModelPriorityDropdown({
         })
       }
     } catch (error) {
-      const detail = getErrorMessage(error)
+      const detail = getErrorMessage(error, '健康检查失败')
       const latest = useInterviewStore.getState()
       indexes.forEach((index) => latest.setModelHealth(index, 'error', detail, 0))
       latest.pushToast(`模型健康检查失败：${detail}`, 'error')
