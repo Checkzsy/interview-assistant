@@ -13,12 +13,10 @@
   <img src="https://img.shields.io/badge/desktop-Electron-6D597A" alt="Electron" />
 </p>
 
-https://github.com/user-attachments/assets/1013b772-c59d-4ec4-8256-f932caa8ea3c
-
 <p align="center">
   <img src="docs/screenshots/assist-demo.gif" alt="面试主流程演示 GIF：实时听题、自动作答、共享隐身、知识库引用" width="100%" />
   <br />
-  <sub>上面是 GitHub 附件视频直链，可在仓库页直接播放；下方保留 GIF 作为静态预览，仓库内原始视频文件仍保留在 <code>docs/screenshots/assist-demo.webm</code>。</sub>
+  <sub>仓库内原始视频文件保留在 <code>docs/screenshots/assist-demo.webm</code>。</sub>
 </p>
 
 ## 为什么值得试
@@ -304,10 +302,6 @@ interview-assistant/
 - **协议**：[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
 - **免责**：项目仅供学习研究，请勿用于学术不端、违规考试或其他不合规场景；使用后果自行承担。
 
-## 赞赏
+## 致谢
 
-若对你有帮助，欢迎请作者喝杯咖啡：
-
-<p align="center">
-  <img src="docs/skm.png" width="260" alt="赞赏码" />
-</p>
+本项目基于开源项目 [powAu3/interview-assistant](https://github.com/powAu3/interview-assistant)（CC BY-NC 4.0）二次开发与增强，感谢上游作者的贡献。
