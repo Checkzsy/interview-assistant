@@ -1150,7 +1150,7 @@ function requestAssistStop(timeoutMs = 12000) {
       settled = true;
       resolve();
     };
-    const req = http.request(`${SERVER_URL}/api/assist/stop`, {
+    const req = http.request(`${SERVER_URL}/api/stop`, {
       method: 'POST',
       timeout: timeoutMs,
     }, (res) => {
