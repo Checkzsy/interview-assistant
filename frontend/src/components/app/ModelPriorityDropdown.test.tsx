@@ -11,6 +11,7 @@ const apiMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({
   api: apiMock,
+  getErrorMessage: (error: unknown, fallback = '操作失败') => (error instanceof Error && error.message) ? error.message : fallback,
 }))
 
 function deferred<T>() {

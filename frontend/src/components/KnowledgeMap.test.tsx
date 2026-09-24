@@ -11,7 +11,10 @@ const apiMock = vi.hoisted(() => ({
   audioInputMonitorStatus: vi.fn(),
 }))
 
-vi.mock('@/lib/api', () => ({ api: apiMock }))
+vi.mock('@/lib/api', () => ({
+  api: apiMock,
+  getErrorMessage: (error: unknown, fallback = '操作失败') => (error instanceof Error && error.message) ? error.message : fallback,
+}))
 
 describe('KnowledgeMap', () => {
   beforeEach(() => {
