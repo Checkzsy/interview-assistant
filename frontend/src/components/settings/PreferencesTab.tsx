@@ -23,6 +23,7 @@ import {
 } from '@/lib/interviewOverlay'
 import { Section, Field, SaveStateBadge, matchSettingsSearch, useAutoSaveSetting, useSettingsSearch } from './shared'
 import NetworkQRCode from './NetworkQRCode'
+import UpdateCard from './UpdateCard'
 import QuickPromptsEditor from './QuickPromptsEditor'
 import GlobalShortcutsEditor from './GlobalShortcutsEditor'
 
@@ -154,6 +155,7 @@ export default function PreferencesTab() {
 
   return (
     <div className="p-5 space-y-5 pb-8" data-in-search={inSearch ? '1' : undefined}>
+      <UpdateCard />
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-bg-hover/60 bg-bg-primary/35 px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-text-primary">常用偏好</p>

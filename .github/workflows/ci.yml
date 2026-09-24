@@ -143,7 +143,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run desktop unit tests
-        run: node --test multiScreenBatch.test.js windowOptions.test.js shortcuts.test.js preload.test.js runtimePaths.test.js runtimePaths.integration.test.js packaging.test.js
+        run: node --test multiScreenBatch.test.js windowOptions.test.js shortcuts.test.js preload.test.js runtimePaths.test.js runtimePaths.integration.test.js packaging.test.js updater.test.js updater-ipc.test.js
 
   # ── Playwright E2E (mocked backend, no live API needed) ──
   e2e-playwright:

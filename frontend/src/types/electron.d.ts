@@ -29,6 +29,26 @@ declare global {
       onDesktopToast?: (callback: (payload: { message: string; level?: 'info' | 'success' | 'warn' | 'error' } | string) => void) => (() => void)
       onConfigUpdated?: (callback: (payload: Record<string, unknown>) => void) => (() => void)
       removeOverlayStateListener?: (listener?: (...args: unknown[]) => void) => void
+      // 更新模块（Electron 桌面版专属；浏览器模式不存在 electronAPI）
+      getUpdaterState?: () => Promise<UpdaterState>
+      checkForUpdate?: () => Promise<UpdaterState>
+      downloadUpdate?: () => Promise<UpdaterState>
+      installUpdate?: () => Promise<{ ok: boolean; error?: string }>
+      onUpdaterState?: (callback: (state: UpdaterState) => void) => (() => void)
     }
+  }
+
+  interface UpdaterState {
+    current: string | null
+    latest: string | null
+    hasUpdate: boolean
+    asset: { name: string; size: number | null; url: string | null; updatedAt: string | null } | null
+    releaseName: string | null
+    publishedAt: string | null
+    checking: boolean
+    checkError: string | null
+    download: { status: 'idle' | 'downloading' | 'done' | 'error'; received: number; total: number; error: string | null; downloadedPath: string | null }
+    installing: boolean
+    installError: string | null
   }
 }

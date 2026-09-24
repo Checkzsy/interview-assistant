@@ -53,6 +53,7 @@ const {
 } = require('./windowOptions');
 const { createMultiScreenBatch } = require('./multiScreenBatch');
 const { buildBackendEnvironment, resolveRuntimePaths } = require('./runtimePaths');
+const { createUpdateController } = require('./updater-ipc');
 
 const pkg = require('./package.json');
 
@@ -942,6 +943,45 @@ function sendOverlayQuestionCommand(direction) {
 ipcMain.handle('hide-window', () => mainWindow?.hide());
 ipcMain.handle('minimize-window', () => mainWindow?.minimize());
 ipcMain.handle('quit-app', () => { isQuitting = true; app.quit(); });
+
+// ── 更新模块（新增，旁路）───────────────────────────────────────
+// 检查 GitHub Releases → 提示 → 下载 → 静默安装。纯增量，不影响启动/悬浮窗等原有逻辑。
+const UPDATER_UPDATE_URL = 'https://api.github.com/repos/Checkzsy/interview-assistant/releases/latest';
+let updateController = null;
+function buildUpdateController() {
+  if (updateController) return updateController;
+  const downloadsDir = path.join(app.getPath('userData'), 'updates');
+  const controller = createUpdateController({
+    currentVersion: app.getVersion(),
+    downloadsDir,
+    apiUrl: UPDATER_UPDATE_URL,
+    checkDelayMs: 0,
+    timeoutMs: 60000,
+  });
+  controller.onEmit((channel, payload) => {
+    const win = mainWindow || overlayWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  });
+  controller.onApplyAndQuit(() => {
+    gracefulStopPython().then(() => {
+      pythonProcess = null;
+      isQuitting = true;
+      app.quit();
+    });
+  });
+  updateController = controller;
+  return controller;
+}
+ipcMain.handle('updater:get-state', () => (buildUpdateController() ).serialize());
+ipcMain.handle('updater:check', () => buildUpdateController().check());
+ipcMain.handle('updater:download', () => buildUpdateController().download());
+ipcMain.handle('updater:install', async () => {
+  const result = await buildUpdateController().install();
+  return result;
+});
+
 ipcMain.handle('show-window', () => { mainWindow?.show(); mainWindow?.focus(); });
 ipcMain.handle('get-shortcuts', () => shortcuts);
 ipcMain.handle('update-shortcuts', (_event, updates) => {
@@ -1234,6 +1274,9 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   registerShortcuts();
+
+  // 启动后延迟检查更新；失败静默，绝不打断主流程。
+  setTimeout(() => { buildUpdateController().check().catch(() => {}); }, 5000);
 
   setImmediate(() => {
     if (overlayWindow && !overlayWindow.isDestroyed()) return;
