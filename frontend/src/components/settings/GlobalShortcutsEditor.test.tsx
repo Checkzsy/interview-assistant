@@ -28,6 +28,31 @@ describe('GlobalShortcutsEditor', () => {
     }
   })
 
+  it('renders operation hints, failure hint, and focus/overlay conditions for mixed statuses', async () => {
+    const mixed = {
+      ...defaultShortcuts,
+      hideOrShowWindow: { ...defaultShortcuts.hideOrShowWindow, status: 'registered' as const },
+      cancelAnswer: { ...defaultShortcuts.cancelAnswer, status: 'failed' as const },
+      focusPrevTab: { ...defaultShortcuts.focusPrevTab, status: 'available' as const },
+      focusNextTab: { ...defaultShortcuts.focusNextTab, status: 'available' as const },
+      overlayPrevQuestion: { ...defaultShortcuts.overlayPrevQuestion, status: 'available' as const },
+      overlayNextQuestion: { ...defaultShortcuts.overlayNextQuestion, status: 'available' as const },
+    }
+
+    render(<GlobalShortcutsEditor />)
+
+    await screen.findByText('隐藏/显示窗口')
+    act(() => {
+      useShortcutsStore.setState({ shortcuts: mixed })
+    })
+
+    expect(screen.getByText('显示或隐藏主窗口')).toBeInTheDocument()
+    expect(screen.getByText('注册失败')).toBeInTheDocument()
+    expect(screen.getByText('当前组合注册失败，请更换快捷键后重试')).toBeInTheDocument()
+    expect(screen.getAllByText('需在专注面板展开时生效')).toHaveLength(2)
+    expect(screen.getAllByText('需悬浮窗已显示时生效')).toHaveLength(2)
+  })
+
   it('ignores rapid duplicate shortcut recordings while save is pending', async () => {
     const save = deferred<{ ok: boolean; shortcuts: Record<string, any> }>()
     window.electronAPI!.updateShortcuts = vi.fn().mockReturnValueOnce(save.promise)

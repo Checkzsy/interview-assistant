@@ -9,6 +9,30 @@ import {
   type ShortcutAction,
 } from '@/lib/shortcuts'
 
+const SHORTCUT_OPERATION_HINTS: Record<ShortcutAction, string> = {
+  hideOrShowWindow: '显示或隐藏主窗口',
+  hardClearSession: '清空当前会话上下文并重新开始',
+  askFromServerScreen: '截取服务端屏幕并提交审题',
+  cancelAnswer: '取消当前正在生成的回答',
+  addMultiServerScreenShot: '依次截取多张屏幕图片，最后一次按下后等待设置时长再统一提交判题',
+  toggleInterviewOverlay: '显示或隐藏悬浮窗',
+  moveOverlayToMouse: '将悬浮窗移动到鼠标所在位置',
+  focusPrevTab: '切换到专注面板上一栏',
+  focusNextTab: '切换到专注面板下一栏',
+  overlayPrevQuestion: '悬浮窗中切换到上一题',
+  overlayNextQuestion: '悬浮窗中切换到下一题',
+  askScreenForceThink: '强制思考模式截图审题',
+  askScreenForceNoThink: '强制非思考模式截图审题',
+  toggleThinkMode: '切换思考模式',
+}
+
+const FOCUS_MODE_ACTIONS = new Set<ShortcutAction>(['focusPrevTab', 'focusNextTab'])
+const OVERLAY_VISIBLE_ACTIONS = new Set<ShortcutAction>([
+  'cancelAnswer',
+  'overlayPrevQuestion',
+  'overlayNextQuestion',
+])
+
 export default function GlobalShortcutsEditor() {
   const shortcuts = useShortcutsStore((s) => s.shortcuts)
   const setShortcuts = useShortcutsStore((s) => s.setShortcuts)
@@ -103,6 +127,7 @@ export default function GlobalShortcutsEditor() {
       <div className="bg-bg-tertiary/30 rounded-lg p-3 text-xs text-text-muted leading-relaxed">
         必须以 <code className="px-1 py-0.5 rounded bg-bg-tertiary border border-bg-hover font-mono text-[11px]">⌘/Ctrl</code> 开头，可叠加 <code className="px-1 py-0.5 rounded bg-bg-tertiary border border-bg-hover font-mono text-[11px]">⇧Shift</code>、<code className="px-1 py-0.5 rounded bg-bg-tertiary border border-bg-hover font-mono text-[11px]">⌥Alt</code>。
         支持字母、数字、Enter、方向键和常用符号。点击某项后直接按新快捷键，<code className="px-1 py-0.5 rounded bg-bg-tertiary border border-bg-hover font-mono text-[11px]">Esc</code> 取消。
+        仅在 Electron 桌面模式下生效；截图类快捷键需要已配置支持识图的模型；多图快捷键在最后一次按下后按设置时间等待提交。
       </div>
       <div className="space-y-2">
         {items.map((action) => {
@@ -120,6 +145,18 @@ export default function GlobalShortcutsEditor() {
                 <div className={`text-[10px] mt-0.5 ${statusTone(shortcut.status)}`}>
                   {statusLabel(shortcut.status)}
                 </div>
+                <div className="text-[10px] mt-0.5 text-text-muted">
+                  {SHORTCUT_OPERATION_HINTS[action]}
+                </div>
+                {shortcut.status === 'failed' && (
+                  <div className="text-[10px] mt-0.5 text-accent-red">当前组合注册失败，请更换快捷键后重试</div>
+                )}
+                {shortcut.status === 'available' && FOCUS_MODE_ACTIONS.has(action) && (
+                  <div className="text-[10px] mt-0.5 text-text-muted">需在专注面板展开时生效</div>
+                )}
+                {shortcut.status === 'available' && OVERLAY_VISIBLE_ACTIONS.has(action) && (
+                  <div className="text-[10px] mt-0.5 text-text-muted">需悬浮窗已显示时生效</div>
+                )}
               </div>
               <button
                 type="button"

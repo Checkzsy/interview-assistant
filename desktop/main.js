@@ -646,6 +646,7 @@ const multiServerScreenBatch = createMultiScreenBatch({
   ),
   onError: (error) => {
     console.error('flushMultiServerScreenBatch failed:', error);
+    notifyDesktopToast(error?.message || '多图截图提交失败', 'error');
   },
 });
 
@@ -657,6 +658,7 @@ async function addMultiServerScreenShot() {
     multiServerScreenBatch.add(res.image, idleMs);
   } catch (error) {
     console.error('addMultiServerScreenShot failed:', error);
+    notifyDesktopToast(error?.message || '多图截图捕获失败', 'error');
   }
 }
 
@@ -801,9 +803,13 @@ function registerShortcutSet(nextShortcuts) {
       }
       const callback = shortcutCallbacks[shortcut.action];
       if (!callback) return;
-      globalShortcut.register(shortcut.key, callback);
-      shortcut.status = ShortcutStatus.Registered;
+      if (globalShortcut.register(shortcut.key, callback)) {
+        shortcut.status = ShortcutStatus.Registered;
+      } else {
+        shortcut.status = ShortcutStatus.Failed;
+      }
     });
+    sendShortcutsState();
     return { ok: false, error: `快捷键注册失败：${failedKey}`, shortcuts };
   }
 
@@ -825,8 +831,10 @@ const shortcutCallbacks = {
   askFromServerScreen: async () => {
     try {
       await postBackend('/api/ask-from-server-screen');
+      notifyDesktopToast('已提交服务端截图审题，请在答案区查看', 'success');
     } catch (error) {
       console.error('askFromServerScreen failed:', error);
+      notifyDesktopToast(error?.message || '服务端截图审题失败', 'error');
     }
   },
   askScreenForceThink: async () => {
@@ -996,7 +1004,6 @@ ipcMain.handle('update-shortcuts', (_event, updates) => {
   return result;
 });
 ipcMain.handle('reset-shortcuts', () => {
-  try { fs.unlinkSync(path.join(app.getPath('userData'), 'shortcuts.json')); } catch {}
   const defaults = createShortcutState();
   const result = registerShortcutSet(defaults);
   if (result.ok) sendShortcutsState();
