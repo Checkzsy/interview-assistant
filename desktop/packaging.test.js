@@ -12,7 +12,7 @@ test('desktop package defines a safe electron-builder layout', () => {
   assert.strictEqual(build.appId, 'com.interviewassistant.desktop')
   assert.strictEqual(build.productName, 'Interview Assistant')
   assert.deepStrictEqual(build.directories, { output: 'dist' })
-  for (const file of ['main.js', 'preload.js', 'runtimePaths.js']) {
+  for (const file of ['main.js', 'preload.js', 'runtimePaths.js', 'updater-notify.js']) {
     assert.ok(build.files.includes(file))
   }
 

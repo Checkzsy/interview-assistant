@@ -1,6 +1,6 @@
 {
   "name": "interview-assistant-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "智能面试学习辅助助手 - Electron 桌面端",
   "appDisplayName": "智能面试学习辅助助手",
   "main": "main.js",
@@ -30,7 +30,8 @@
       "app-title.json",
       "icon.png",
       "updater.js",
-      "updater-ipc.js"
+      "updater-ipc.js",
+      "updater-notify.js"
     ],
     "extraResources": [
       {
