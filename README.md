@@ -207,7 +207,9 @@ python start.py --mode network  # 浏览器模式，默认 http://localhost:1808
 - 只想在浏览器里体验时，可直接用 `--mode network`。
 - **AMD 显卡（ROCm）用户**：本地 Whisper 的设备探测已按 ctranslate2 实际支持情况修正，无需额外配置；如遇 STT 加载异常，确认 faster-whisper / ctranslate2 已正确安装即可。
 
-## 打包 Windows 安装包
+## 打包与发布 Windows 安装包
+
+本地构建仍使用以下命令：
 
 ```bash
 cd frontend
@@ -219,20 +221,42 @@ npm ci
 npm run dist
 ```
 
-输出文件：
+输出目录为 `desktop/dist/`，其中包含 NSIS `.exe` 安装包。Git push 本身不会生成或上传 EXE。
 
-```text
-desktop/dist/Interview Assistant Setup 1.0.0.exe
+### 发布 EXE
+
+正式发布由 `.github/workflows/release-windows.yml` 执行。发布前：
+
+1. 将 `desktop/package.json` 的 `version` 更新为稳定的 `X.Y.Z`。
+2. 提交版本变更。
+3. 创建并推送完全匹配的 tag：
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-当前打包边界：
+Windows workflow 会校验 tag 与 `desktop/package.json` 版本一致，在 `windows-latest` 上构建前端、PyInstaller 后端和 NSIS 安装包，并把 `.exe` 发布到对应 GitHub Release。预发布 tag（例如 `v1.3.0-beta`）会被拒绝。
+
+### 应用内更新
+
+已安装的桌面版会在启动约 5 秒后检查 GitHub 最新稳定 Release。发现更高版本且 Release 含 `.exe` 时，应用只提示一次“发现新版本”桌面 Toast；同一版本重启不会重复提示。用户仍需打开设置页，在“检查更新”卡片中手动下载并确认安装，应用不会自动下载或静默安装。
+
+更新器下载完成后由 NSIS 以静默模式启动，并优雅退出旧应用。安装完成后用户重新启动应用即可；网络检查失败不会阻断正常启动。
+
+### 安装覆盖与数据保留
+
+当前安装身份必须保持不变：`appId` 为 `com.interviewassistant.desktop`，`productName` 为 `Interview Assistant`，NSIS 为 `oneClick: false`、`perMachine: false`。在这些值不变且版本号递增时，新版 EXE 会按同一 per-user 安装身份升级原安装，而不是创建并存安装。
+
+运行时数据与配置（包括快捷键）写入 Electron `userData` 目录，不写入安装目录，因此升级应保留这些数据。首次发布或修改安装配置后，请按 [`docs/release/windows-upgrade-checklist.md`](docs/release/windows-upgrade-checklist.md) 在真实 Windows 环境验证覆盖安装和数据保留；静态测试不能替代该验证。
+
+### 当前打包边界
 
 - 使用 electron-builder / NSIS，默认 per-user 安装。
 - Electron 壳、前端 `dist` 和后端可执行文件会进入安装包。
 - 安装包内置 PyInstaller 打好的独立后端 `resources/backend/backend.exe`，目标机器无需 Python。
 - 打包链会先执行 `npm run build:backend`（PyInstaller），再把产物放入 `resources/backend`。
 - 构建机需要安装后端依赖和 PyInstaller；脚本会排除与项目无关的重型依赖（torch/pandas/scipy 等）。
-- 运行时数据与配置写入 Electron `userData` 目录，不写入安装目录。
 - 安装包未做 Authenticode 签名，Windows SmartScreen 可能提示风险。
 - 若只需验证目录布局，可在 `desktop/` 执行 `npm run dist:dir`。
 

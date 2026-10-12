@@ -54,6 +54,7 @@ const {
 const { createMultiScreenBatch } = require('./multiScreenBatch');
 const { buildBackendEnvironment, resolveRuntimePaths } = require('./runtimePaths');
 const { createUpdateController } = require('./updater-ipc');
+const { createNotifyTracker } = require('./updater-notify');
 
 const pkg = require('./package.json');
 
@@ -1283,7 +1284,24 @@ app.whenReady().then(async () => {
   registerShortcuts();
 
   // 启动后延迟检查更新；失败静默，绝不打断主流程。
-  setTimeout(() => { buildUpdateController().check().catch(() => {}); }, 5000);
+  setTimeout(async () => {
+    try {
+      const controller = buildUpdateController();
+      await controller.check();
+      const state = controller.serialize();
+      if (!state.hasUpdate || !state.latest) return;
+
+      const tracker = createNotifyTracker({
+        filePath: path.join(app.getPath('userData'), 'updates', 'notified-version.json'),
+      });
+      if (!tracker.shouldNotify(state.latest)) return;
+
+      tracker.markNotified(state.latest);
+      notifyDesktopToast(`发现新版本 ${state.latest}，请打开设置下载更新`, 'info');
+    } catch {
+      // 更新检查、通知记录失败都不能阻断应用启动。
+    }
+  }, 5000);
 
   setImmediate(() => {
     if (overlayWindow && !overlayWindow.isDestroyed()) return;
