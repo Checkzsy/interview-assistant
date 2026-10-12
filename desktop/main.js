@@ -52,7 +52,7 @@ const {
   relayChildOutput,
 } = require('./windowOptions');
 const { createMultiScreenBatch } = require('./multiScreenBatch');
-const { buildBackendEnvironment, resolveRuntimePaths } = require('./runtimePaths');
+const { buildBackendEnvironment, resolveRuntimePaths, resolveServerPort } = require('./runtimePaths');
 const { createUpdateController } = require('./updater-ipc');
 const { createNotifyTracker } = require('./updater-notify');
 
@@ -87,8 +87,10 @@ const RUNTIME_PATHS = resolveRuntimePaths({
 });
 const ROOT = RUNTIME_PATHS.root;
 const BACKEND_DIR = RUNTIME_PATHS.backendDir;
-const PORT = parseInt(process.env.PORT || '18080', 10);
-const SERVER_URL = `http://127.0.0.1:${PORT}`;
+// 端口在启动时异步解析：优先用户显式 PORT，否则从 18080 起探测空闲端口，
+// 保留段/占用端口自动跳过并回退到可用端口（见 whenReady）。
+let PORT = null;
+let SERVER_URL = null;
 
 let mainWindow = null;
 let overlayWindow = null;
@@ -346,7 +348,10 @@ function startPythonBackend() {
   pythonProcess = spawn(command, args, {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: buildBackendEnvironment(RUNTIME_PATHS, process.env),
+    env: buildBackendEnvironment(RUNTIME_PATHS, {
+      ...process.env,
+      PORT: String(PORT),
+    }),
     windowsHide: true,
   });
 
@@ -1267,7 +1272,10 @@ app.whenReady().then(async () => {
     /* 个别平台/版本可能不支持 */
   }
   createAppMenu();
-  console.log('Starting Python backend...');
+  // 解析可用端口后再启动后端，避免撞上被保留/占用的端口导致后端起不来。
+  PORT = await resolveServerPort(18080, { envPort: process.env.PORT });
+  SERVER_URL = `http://127.0.0.1:${PORT}`;
+  console.log(`Starting Python backend on port ${PORT}...`);
   startPythonBackend();
 
   try {

@@ -1,7 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const path = require('node:path')
-const { buildBackendEnvironment, resolveRuntimePaths } = require('./runtimePaths')
+const { buildBackendEnvironment, resolveRuntimePaths, resolveServerPort, probePort } = require('./runtimePaths')
 
 test('development runtime keeps repository layout and does not force user-data overrides', () => {
   const result = resolveRuntimePaths({
@@ -52,4 +52,52 @@ test('backend environment is isolated only in packaged mode', () => {
   assert.strictEqual(packagedEnv.IA_DATA_DIR, packagedPaths.dataDir)
   assert.strictEqual(packagedEnv.IA_CONFIG_PATH, packagedPaths.configPath)
   assert.strictEqual(packagedEnv.IA_FRONTEND_DIST, packagedPaths.frontendDist)
+})
+
+test('resolveServerPort probes the default port first and returns it when free', async () => {
+  const port = await resolveServerPort(18080, {
+    envPort: undefined,
+    probe: async () => true,
+  })
+  assert.strictEqual(port, 18080)
+})
+
+test('resolveServerPort skips reserved/occupied ports and falls back to an available one', async () => {
+  const unavailable = new Set([18080, 9090])
+  const port = await resolveServerPort(18080, {
+    envPort: undefined,
+    probe: async (p) => !unavailable.has(p),
+  })
+  assert.strictEqual(port, 18122)
+})
+
+test('resolveServerPort honors an explicit PORT env even when the default is free', async () => {
+  const port = await resolveServerPort(18080, {
+    envPort: 19530,
+    probe: async (p) => p === 19530,
+  })
+  assert.strictEqual(port, 19530)
+})
+
+test('resolveServerPort falls back to probing when explicit PORT is unusable', async () => {
+  // explicit 19400 与默认 18080、9090 均不可用，回退到 18122
+  const port = await resolveServerPort(18080, {
+    envPort: 19400,
+    probe: async (p) => p !== 19400 && p !== 18080 && p !== 9090,
+  })
+  assert.strictEqual(port, 18122)
+})
+
+test('resolveServerPort returns the preferred port when every candidate is unavailable', async () => {
+  const port = await resolveServerPort(18080, {
+    envPort: undefined,
+    probe: async () => false,
+  })
+  assert.strictEqual(port, 18080)
+})
+
+test('probePort returns false on reserved/occupied ports and true when binding succeeds', async () => {
+  const { probePort } = require('./runtimePaths')
+  assert.strictEqual(await probePort(9090), true)
+  assert.strictEqual(await probePort(18080), false)
 })
