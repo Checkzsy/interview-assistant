@@ -1,5 +1,20 @@
 # 修复日志
 
+## 2026-10-12 - 桌面版内置 soundcard（系统音频采集）修复
+
+### 🐛 修复的问题
+
+- **问题**：安装桌面版后，音频页提示「⚠️ 未检测到系统音频输出设备！请安装 soundcard：pip install soundcard」。`soundcard`（Windows WASAPI 系统音频采集）在源码中是可选导入、未列入 `requirements.txt`，PyInstaller 打包时不会将其打进 exe，导致桌面版 `_HAS_SC=False`、无 loopback 设备。该提示对源码开发者是可行指引，但对桌面版用户是**无效指引**（打包的 exe 里没有 pip，无法手动安装）。
+- **解决方案**：将 `soundcard` 内置进桌面版——
+  - `backend/requirements.txt` 新增 `soundcard>=0.4.6,<1.0`
+  - `desktop/package.json` 的 PyInstaller 命令新增 `--collect-all soundcard --collect-all comtypes`（soundcard 依赖 comtypes，需一并打包）
+- **验证**：`soundcard` 能识别本机 6 个扬声器设备；`AudioCapture.get_platform_info()` 返回 `has_loopback: True`、`needs_virtual_device: False`，警告消失；54 个音频相关后端测试全部通过
+
+### 📝 修改的文件
+
+- **backend/requirements.txt** — 新增 `soundcard` 依赖
+- **desktop/package.json** — PyInstaller 打包命令新增 `--collect-all soundcard --collect-all comtypes`
+
 ## 2026-10-12 - 桌面端启动端口保留段修复
 
 ### 🐛 修复的问题

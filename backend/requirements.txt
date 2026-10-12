@@ -8,6 +8,7 @@ websocket-client>=1.6.0,<2.0
 # PDF 简历：用 PyMuPDF 转图 + VL 模型识图（需在设置中配置识图模型）
 pymupdf>=1.24.0,<2.0
 sounddevice>=0.4.6,<1.0
+soundcard>=0.4.6,<1.0
 numpy>=1.24.0,<2.0
 faster-whisper>=1.0.0,<2.0
 pydantic>=2.5.0,<3.0
