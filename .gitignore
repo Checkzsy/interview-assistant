@@ -96,7 +96,11 @@ frontend/.last-run.json
 
 CODE_REVIEW.md
 .omx/
+# AI 编排工具内部运行态（不入库）
+.superpowers/
 # 对标样本安装包与临时文件（不入库）
 /exe/
 /pelican-bike.html
 /.research-artifacts/
+.omc/
+desktop/.omc/
