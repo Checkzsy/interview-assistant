@@ -1,6 +1,7 @@
 """LLM client management, token tracking, and streaming generation."""
 
 import threading
+import time
 import json
 import re
 from types import SimpleNamespace
@@ -230,6 +231,12 @@ _RETRYABLE_ERRORS = (
     LLMServerError,
     LLMConnectionError,
 )
+
+# 单模型瞬时失败重试（同模型，不跨模型降级）。
+# 只在「首个 chunk 产出之前」重试：一旦开始输出正文，重试会造成答案重复，
+# 因此进入流式阶段后不再重试。内置固定策略，不做用户配置项。
+_LLM_RETRY_MAX_ATTEMPTS = 3        # 首次 + 2 次重试
+_LLM_RETRY_BACKOFF_SEC = (0.6, 1.8)
 
 _token_stats: dict = {"prompt": 0, "completion": 0, "total": 0, "by_model": {}}
 _token_lock = threading.Lock()
@@ -650,6 +657,19 @@ def chat_stream(
         yield ("text", f"\n\n[{last_error.user_msg}]")
 
 
+def _sleep_before_retry(attempt: int, abort_check: Optional[Callable[[], bool]]) -> bool:
+    """退避等待；期间每 0.1s 响应一次取消。返回 True 表示已被取消（应停止重试）。"""
+    delay = _LLM_RETRY_BACKOFF_SEC[min(attempt, len(_LLM_RETRY_BACKOFF_SEC) - 1)]
+    deadline = time.monotonic() + delay
+    while True:
+        if abort_check and abort_check():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.1, remaining))
+
+
 def chat_stream_single_model(
     model_cfg,
     messages: list[dict],
@@ -669,8 +689,12 @@ def chat_stream_single_model(
         full_messages.append({"role": "system", "content": system_prompt})
     full_messages.extend(clean_messages)
     model_name = model_cfg.name
-    try:
-        emit_think = _should_emit_think(model_cfg, cfg)
+    emit_think = _should_emit_think(model_cfg, cfg)
+
+    def _open_stream() -> Generator[tuple[str, str], None, None]:
+        # 该闭包本身是生成器：_try_stream_with_model 直到首次 next() 才真正发起请求，
+        # 因此「建连失败」「首块之前失败（含 HTTP 503）」都在第一次 next() 处暴露，
+        # 可安全重试；一旦产出过 chunk 就不再重试（重试会导致答案重复）。
         response = _try_stream_with_model(model_cfg, full_messages, cfg)
         last_usage = (0, 0)
         for chunk in response:
@@ -693,15 +717,43 @@ def chat_stream_single_model(
                 if usage_callback:
                     usage_callback(prompt_tokens, completion_tokens, model_name)
                 _broadcast_tokens()
+
+    phase = "connect"
+    try:
+        attempts_used = 0
+        for attempt in range(_LLM_RETRY_MAX_ATTEMPTS):
+            attempts_used = attempt + 1
+            if abort_check and abort_check():
+                return
+            try:
+                candidate = _open_stream()
+                first = next(candidate)
+                stream = candidate
+                break
+            except StopIteration:
+                return
+            except Exception as e:
+                err = _classify_exception(e)
+                if not isinstance(err, _RETRYABLE_ERRORS) or attempt == _LLM_RETRY_MAX_ATTEMPTS - 1:
+                    raise err from None
+                _log.warning(
+                    "LLM single-model retry model=%s kind=%s attempt=%d/%d: %s",
+                    model_name, type(err).__name__, attempt + 1, _LLM_RETRY_MAX_ATTEMPTS,
+                    _compact_error_detail(err),
+                )
+                if _sleep_before_retry(attempt, abort_check):
+                    return
+        yield first
+        phase = "streaming"
+        yield from stream
     except Exception as e:
         err = _classify_exception(e)
         _log.error(
-            "LLM single-model error model=%s kind=%s: %s",
-            model_name, type(err).__name__, _compact_error_detail(err),
+            "LLM single-model error model=%s kind=%s phase=%s attempt=%d/%d: %s",
+            model_name, type(err).__name__, phase, attempts_used, _LLM_RETRY_MAX_ATTEMPTS,
+            _compact_error_detail(err),
         )
         # Keep transport failures out of the answer text. The answer worker
         # needs a terminal error state so a failed request is not persisted or
         # presented as a successful answer card.
-        if err is e:
-            raise
         raise err from None

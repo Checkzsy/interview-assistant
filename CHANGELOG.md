@@ -1,5 +1,24 @@
 # 修复日志
 
+## 2026-10-14 - 单模型瞬时失败重试（同模型，用户无感）
+
+### ✨ 新增能力
+
+- **问题**：答题链路 `chat_stream_single_model` 此前无任何重试。一旦底层 SDK/HTTP 出现瞬时失败（限流抖动、连接重置、5xx），会直接抛 `LLMError`，前端弹「答案生成失败」toast、该题被判失败。但实际中这类失败往往重试一次就能成功。
+- **解决方案**：为单模型流式请求增加**同模型瞬时失败重试**——
+  - 最多重试 **2 次**，退避 `0.6s → 1.8s`（最坏额外等待约 2.4s）
+  - **只在「首个 chunk 产出之前」重试**：一旦开始输出正文，重试会导致答案文本重复，因此进入流式阶段后照常失败（行为与之前完全一致）
+  - 覆盖 SDK 建流失败与 HTTP 退回路径（`_stream_via_http` 的 503 也发生在首块之前，同样可重试）
+  - 重试期间走到成功时**不广播任何错误消息**，用户只感受到回答略慢，全程无感；用户取消在中途会立即中止退避
+  - 内置固定策略，不做配置项，不改变任何 WS 消息协议
+- **验证**：新增 `tests/test_llm_retry.py` 7 个用例（瞬时失败重试、首块前 503 重试、非可重试错误不重试、重试耗尽、首块后失败不重试回归防护、HTTP 503 重试、退避期间取消）全部通过；`test_think_params.py`（56）、`test_assist_answer_worker.py`+`test_pipeline_p0.py`（81）全量回归通过
+
+### 📝 修改的文件
+
+- **backend/services/llm/streaming.py** — 新增 `_LLM_RETRY_MAX_ATTEMPTS`/`_LLM_RETRY_BACKOFF_SEC` 常量、`_sleep_before_retry` 退避辅助；重构 `chat_stream_single_model`，用闭包 + 首块 `next()` 捕获构造阶段失败
+- **backend/tests/test_llm_retry.py** — 新增重试行为测试
+- **.github/workflows/ci.yml** — 测试列表加入 `tests/test_llm_retry.py`
+
 ## 2026-10-12 - 桌面版内置 soundcard（系统音频采集）修复
 
 ### 🐛 修复的问题
