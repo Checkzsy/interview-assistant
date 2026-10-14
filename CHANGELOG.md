@@ -1,5 +1,41 @@
 # 修复日志
 
+## 2026-10-14 - 桌面端更新安装：误报弹窗与自动重启失效修复
+
+### 🐛 修复的问题
+
+#### 1. 点击「安装并重启」后弹出「后端已退出 / 端口被占用」误报
+
+- **问题**：下载更新后点击安装，安装器启动不久即弹出对话框「Python 后端进程异常退出 (code X)。可能原因：端口 18080 被占用。」用户被误导去处理一个并不存在的端口冲突；日志却显示后端是被正常停止的（`INTERVIEW_STOP`，`error.log` 为空）。
+- **根因**：`desktop/main.js` 的 `onApplyAndQuit` 回调把 `isQuitting = true` 写在 `gracefulStopPython().then(...)` 的**微任务**里。后端进程结束时，Node 的 `ChildProcess` 可能在同一轮同步事件中紧接着 `exit` 发出 `close`（`exit` 已同步 resolve 上面的 promise），而微任务要等当前同步栈退出才执行，因此 `close` 处理器读到的 `isQuitting` 仍是 `false`，告警触发。正常的 `before-quit` 路径不受影响，因为它把置位写在同步第一行。
+- **解决方案**：把 `isQuitting = true` 提到 `onApplyAndQuit` 回调的同步入口，与 `before-quit` 的既有写法对齐。
+- **顺带优化**：后端退出告警改为面向用户的措辞，不再把猜测（端口占用）当结论，也不再泄漏端口号、退出码、实现语言等内部细节；退出码仍保留在 stdout 日志中供排查。
+
+#### 2. 静默安装完成后应用不会自动重启
+
+- **问题**：安装成功但应用一直不自动打开。
+- **根因**：`desktop/updater.js` 启动安装器时只传了 `/S`。本项目用 `nsis.oneClick: false`（assisted installer），其模板 `installSection.nsh` 的静默分支要求 `${isForceRun}` 与 `${Silent}` **同时**成立才拉起应用：
+  ```nsis
+  ${if} ${isForceRun}
+  ${andIf} ${Silent}
+    !insertmacro doStartApp
+  ${endIf}
+  ```
+  只传 `/S` 时 `${Silent}` 成立但 `${isForceRun}` 为假，装完什么都不发生。
+- **解决方案**：`launchInstaller` 改为 `spawn(exePath, ['/S', '--updated', '--force-run'])`。`--force-run` 是 electron-builder 注册的合法标志（`NsisTarget` 的 `flags([...])`），由 `StdUtils.TestParameter` 在命令行上判定；`--updated` 让安装器按「升级」处理，在强杀旧进程前保留约 1.3s 优雅退出宽限（`allowOnlyOneInstallerInstance.nsh` 的 `${if} ${isUpdated} Sleep` 分支），避免升级瞬间截断 `/api/stop` 的复盘归档与 SQLite 刷盘——这是 electron-updater 静默更新的同款参数组合。
+
+### 📝 修改的文件
+
+- **desktop/main.js** — `onApplyAndQuit` 同步置位 `isQuitting`；后端退出告警文案友好化
+- **desktop/updater.js** — 安装器补 `--force-run` 与 `--updated`；`launchInstaller` 增加可注入 `spawnFn` 以便断言参数
+- **desktop/updater.test.js** — 新增 `/S`+`--updated`+`--force-run` 参数断言、spawn 失败降级两个用例
+- **desktop/updater-install-regression.test.js** — 新增，防回归：锁死 `isQuitting` 置位顺序与告警文案不含端口/退出码
+- **.github/workflows/ci.yml** — desktop 测试列表加入新文件
+
+### ⚠️ 生效范围说明
+
+修复在**下一次**更新时生效：安装动作由**旧版本**进程发起，因此**从旧版更新到本修复版本的那一次**仍会弹旧弹窗、且不会自动重启；之后版本间的更新开始，两个问题均消失。
+
 ## 2026-10-14 - 单模型瞬时失败重试（同模型，用户无感）
 
 ### ✨ 新增能力

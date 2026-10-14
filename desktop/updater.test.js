@@ -115,3 +115,65 @@ test('launchInstaller rejects when installer file does not exist', async () => {
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
 });
+
+test('launchInstaller passes /S, --updated and --force-run so a silent update installs and relaunches', async () => {
+  const { EventEmitter } = require('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-installer-'));
+  const exe = path.join(dir, 'Setup.exe');
+  fs.writeFileSync(exe, 'stub');
+
+  const captured = {};
+  const fakeSpawn = (command, args, options) => {
+    captured.command = command;
+    captured.args = args;
+    captured.options = options;
+    const child = new EventEmitter();
+    child.unref = () => {};
+    child.pid = 4321;
+    // 让 Promise 内的 'spawn' 监听器先完成注册。
+    setImmediate(() => child.emit('spawn'));
+    return child;
+  };
+
+  try {
+    const result = await launchInstaller(exe, { spawnFn: fakeSpawn });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.pid, 4321);
+    assert.strictEqual(captured.command, exe);
+    assert.ok(captured.args.includes('/S'), '必须静默安装');
+    assert.ok(
+      captured.args.includes('--force-run'),
+      'assisted installer 在 /S 下只有带 --force-run 才会重启应用',
+    );
+    assert.ok(
+      captured.args.includes('--updated'),
+      '静默更新须带 --updated 以保留升级前的优雅退出宽限，避免截断复盘归档/SQLite 刷盘',
+    );
+    assert.strictEqual(captured.options.detached, true);
+    assert.strictEqual(captured.options.stdio, 'ignore');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launchInstaller surfaces a spawn failure as ok:false', async () => {
+  const { EventEmitter } = require('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-installer-'));
+  const exe = path.join(dir, 'Setup.exe');
+  fs.writeFileSync(exe, 'stub');
+
+  const fakeSpawn = () => {
+    const child = new EventEmitter();
+    child.unref = () => {};
+    setImmediate(() => child.emit('error', new Error('EACCES')));
+    return child;
+  };
+
+  try {
+    const result = await launchInstaller(exe, { spawnFn: fakeSpawn });
+    assert.strictEqual(result.ok, false);
+    assert.match(result.error, /EACCES/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

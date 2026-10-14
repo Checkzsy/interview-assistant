@@ -174,15 +174,23 @@ function downloadFile(url, destPath, { onProgress, expectedBytes = null, timeout
   });
 }
 
-/** 静默安装 NSIS 安装包；detached 让安装器独立于本进程生命周期 */
-function launchInstaller(exePath) {
+/** 静默安装 NSIS 安装包；detached 让安装器独立于本进程生命周期。
+ *  --force-run 是必需的重启开关：assisted installer（oneClick:false）只有在
+ *  `${isForceRun} ${andIf} ${Silent}` 同时成立时才会拉起应用，仅传 /S 装完不会重启。
+ *  --updated 让安装器把本次视为「升级安装」：在强杀进程前保留约 1.3s 的优雅退出宽限
+ *  （allowOnlyOneInstallerInstance.nsh 的 ${if} ${isUpdated} Sleep 分支），给 /api/stop
+ *  的复盘归档与 SQLite 刷盘留出时间，避免升级瞬间截断数据。这是 electron-updater 对
+ *  静默更新采用的同款参数组合。
+ *  spawnFn 可注入，便于测试断言实际参数。
+ */
+function launchInstaller(exePath, { spawnFn = spawn } = {}) {
   return new Promise((resolve) => {
     try {
       if (!exePath || !fs.existsSync(exePath)) {
         resolve({ ok: false, error: 'installer not found' });
         return;
       }
-      const child = spawn(exePath, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
+      const child = spawnFn(exePath, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
       let settled = false;
       child.on('error', (err) => {
         if (settled) return;

@@ -363,7 +363,11 @@ function startPythonBackend() {
     if (!isQuitting) {
       if (mainWindow) {
         const { dialog } = require('electron');
-        dialog.showErrorBox('后端已退出', `Python 后端进程异常退出 (code ${code})。\n可能原因：端口 ${PORT} 被占用。\n请关闭占用该端口的进程后重试。`);
+        dialog.showErrorBox(
+          '后台服务已停止',
+          '应用的后台服务意外停止，界面可能无法正常使用。\n\n' +
+            '建议：退出应用后重新打开。若问题持续，请检查安全软件是否拦截了本程序，或重启电脑后再试。',
+        );
       }
       app.quit();
     }
@@ -979,9 +983,13 @@ function buildUpdateController() {
     }
   });
   controller.onApplyAndQuit(() => {
+    // 必须在同步入口置位，不能放进 .then()：后端进程结束时 'close' 可能与本轮同步事件
+    // 同批到达（此时 'exit' 已同步发出、resolve 了 gracefulStopPython 的 promise），
+    // 而微任务要等当前同步栈退出才执行，'close' 处理器便会读到 isQuitting === false，
+    // 误报「后台服务已停止」。置位提前后两种时序都安全。
+    isQuitting = true;
     gracefulStopPython().then(() => {
       pythonProcess = null;
-      isQuitting = true;
       app.quit();
     });
   });
