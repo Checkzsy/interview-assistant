@@ -96,8 +96,30 @@ test('resolveServerPort returns the preferred port when every candidate is unava
   assert.strictEqual(port, 18080)
 })
 
-test('probePort returns false on reserved/occupied ports and true when binding succeeds', async () => {
-  const { probePort } = require('./runtimePaths')
-  assert.strictEqual(await probePort(9090), true)
-  assert.strictEqual(await probePort(18080), false)
+test('probePort detects a port currently in use and reports it free after release', async () => {
+  const net = require('node:net')
+
+  // 占住一个随机空闲端口（不硬编码端口号，避免环境差异导致 flaky）
+  const server = net.createServer()
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  const port = server.address().port
+  assert.ok(port > 0, '应取得一个有效端口')
+
+  try {
+    // 被占用时应探测为不可用
+    assert.strictEqual(await probePort(port), false, '被占用的端口应探测为不可用')
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+
+  // 释放后重试探测直到可绑定（端口刚释放可能有极短的重绑窗口，重试避免 flaky）
+  let free = false
+  for (let i = 0; i < 20 && !free; i += 1) {
+    free = await probePort(port)
+    if (!free) await new Promise((r) => setTimeout(r, 50))
+  }
+  assert.strictEqual(free, true, '释放后的端口应恢复可绑定')
 })
