@@ -105,7 +105,15 @@ describe('KbFilesPanel', () => {
     fireEvent.click(button)
     fireEvent.click(button)
 
-    expect(window.confirm).toHaveBeenCalledTimes(1)
+    // 删除确认走自绘弹窗：点行内按钮只打开弹窗，不会直接发请求
+    expect(apiMock.kbDelete).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }))
+
+    expect(apiMock.kbDelete).toHaveBeenCalledTimes(1)
+
+    // 请求未完成时再点行内删除按钮应被忽略，不会弹第二个确认框
+    fireEvent.click(button)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(apiMock.kbDelete).toHaveBeenCalledTimes(1)
 
     await act(async () => {

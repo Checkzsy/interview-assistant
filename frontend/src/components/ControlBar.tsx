@@ -24,6 +24,7 @@ import { ResumeMountInline } from '@/components/resume/ResumeMount'
 import { AudioDevicePicker } from './control-bar/AudioDevicePicker'
 import { QuickPromptsRow } from './control-bar/QuickPromptsRow'
 import { WsReconnectingBanner } from './control-bar/WsReconnectingBanner'
+import ConfirmDialog from './common/ConfirmDialog'
 import { splitAudioDevices } from './control-bar/audioDevices'
 import {
   bumpQuickPromptRecent,
@@ -31,6 +32,13 @@ import {
   orderByRecent,
   readQuickPromptRecent,
 } from './control-bar/quickPrompts'
+
+/**
+ * 「取消生成」的兜底窗口：点了取消后若这么久还没收到后端 answer_cancelled，
+ * 前端主动把当时的卡片标成已取消，避免一直停在「生成中」。
+ * 后端正常路径都在几十毫秒内回事件，这里只兜异常情况，不要调小。
+ */
+const CANCEL_SETTLE_FALLBACK_MS = 1200
 
 export {
   DEFAULT_QUICK_PROMPTS,
@@ -101,6 +109,8 @@ export default function ControlBar() {
   const [pastedImage, setPastedImage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showStopConfirm, setShowStopConfirm] = useState(false)
   const [cancellingAsk, setCancellingAsk] = useState(false)
   const [asking, setAsking] = useState(false)
   const [refreshingDevices, setRefreshingDevices] = useState(false)
@@ -135,6 +145,7 @@ export default function ControlBar() {
   const clearingRef = useRef(false)
   const cancellingAskRef = useRef(false)
   const cancellingAskResetTimerRef = useRef<number | null>(null)
+  const cancelledSettleTimerRef = useRef<number | null>(null)
   const refreshingDevicesRef = useRef(false)
   const testingOutputRef = useRef(false)
   const testingInputRef = useRef(false)
@@ -310,9 +321,8 @@ export default function ControlBar() {
       setLoading(false)
     }
   }, [selectedDevice, effectiveCandidateMic, isExamMode])
-  const handleStop = useCallback(async () => {
+  const performStop = useCallback(async () => {
     if (lifecycleActionRef.current) return
-    if (isRecording && !window.confirm(isExamMode ? '结束本次笔试？当前答案会保留在页面上。' : '结束本次面试？将停止录音，当前转录与答案会保留在页面上。')) return
     lifecycleActionRef.current = true
     setLoading(true)
     try {
@@ -324,7 +334,17 @@ export default function ControlBar() {
       lifecycleActionRef.current = false
       setLoading(false)
     }
-  }, [isExamMode, isRecording])
+  }, [isExamMode])
+
+  const handleStop = useCallback(() => {
+    if (lifecycleActionRef.current) return
+    // 录制中结束属于影响面试流程的操作，走统一确认框；未开始则直接忽略。
+    if (isRecording) {
+      setShowStopConfirm(true)
+      return
+    }
+    void performStop()
+  }, [isRecording, performStop])
   const handlePause = useCallback(async () => {
     if (lifecycleActionRef.current) return
     lifecycleActionRef.current = true
@@ -339,6 +359,10 @@ export default function ControlBar() {
     if (cancellingAskResetTimerRef.current !== null) {
       window.clearTimeout(cancellingAskResetTimerRef.current)
       cancellingAskResetTimerRef.current = null
+    }
+    if (cancelledSettleTimerRef.current !== null) {
+      window.clearTimeout(cancelledSettleTimerRef.current)
+      cancelledSettleTimerRef.current = null
     }
     cancellingAskRef.current = false
   }, [])
@@ -358,11 +382,8 @@ export default function ControlBar() {
       setLoading(false)
     }
   }, [selectedDevice, effectiveCandidateMic, isExamMode])
-  const handleClear = useCallback(async () => {
+  const performClear = useCallback(async () => {
     if (clearingRef.current) return
-    if (qaPairs.length > 0 || transcriptions.length > 0 || candidateTranscriptions.length > 0) {
-      if (!window.confirm('确定要清空当前页的转录与答案吗？清空后不可恢复。')) return
-    }
     clearingRef.current = true
     setClearing(true)
     try {
@@ -374,17 +395,44 @@ export default function ControlBar() {
       clearingRef.current = false
       setClearing(false)
     }
-  }, [qaPairs.length, transcriptions.length, candidateTranscriptions.length, clearSession, setToastMessage])
+  }, [clearSession, setToastMessage])
+
+  const handleClear = useCallback(async () => {
+    if (clearingRef.current) return
+    // 有内容时先弹统一确认框；空页面直接清，不打扰。
+    if (qaPairs.length > 0 || transcriptions.length > 0 || candidateTranscriptions.length > 0) {
+      setShowClearConfirm(true)
+      return
+    }
+    await performClear()
+  }, [qaPairs.length, transcriptions.length, candidateTranscriptions.length, performClear])
 
   const handleCancelAsk = useCallback(async () => {
     if (cancellingAskRef.current) return
     cancellingAskRef.current = true
     setCancellingAsk(true)
+    // 记下点取消时还在生成的卡片：若在兜底窗口内没收到后端 answer_cancelled
+    // （例如识图/排队阶段被丢弃、WS 抖动），本地把它们标成已取消，
+    // 否则卡片会一直显示「生成中」，只能刷新页面。
+    const pendingIds = [...useInterviewStore.getState().streamingIds]
     try {
       await api.cancelAsk()
       setToastMessage('已发送取消')
     } catch (e: unknown) {
       setError(`取消生成失败：${getErrorMessage(e)}`)
+    }
+    if (pendingIds.length > 0) {
+      if (cancelledSettleTimerRef.current !== null) {
+        window.clearTimeout(cancelledSettleTimerRef.current)
+      }
+      cancelledSettleTimerRef.current = window.setTimeout(() => {
+        cancelledSettleTimerRef.current = null
+        const store = useInterviewStore.getState()
+        // 只回退「点取消时就在流、到现在还没结束」的卡片；
+        // 期间已经收到 answer_done / answer_error 的不会被误伤。
+        const stillStreaming = store.streamingIds.filter((id) => pendingIds.includes(id))
+        for (const id of stillStreaming) store.cancelAnswer(id)
+      }, CANCEL_SETTLE_FALLBACK_MS)
     }
     if (cancellingAskResetTimerRef.current !== null) {
       window.clearTimeout(cancellingAskResetTimerRef.current)
@@ -908,6 +956,55 @@ export default function ControlBar() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={showStopConfirm}
+        tone="default"
+        title={isExamMode ? '结束本次笔试？' : '结束本次面试？'}
+        description={
+          isExamMode
+            ? '将停止笔试模式，当前答案会保留在页面上。'
+            : '将停止录音，当前转录与答案会保留在页面上。'
+        }
+        confirmLabel={isExamMode ? '结束笔试' : '结束面试'}
+        busy={loading}
+        onCancel={() => setShowStopConfirm(false)}
+        onConfirm={() => {
+          setShowStopConfirm(false)
+          void performStop()
+        }}
+      />
+
+      <ConfirmDialog
+        open={showClearConfirm}
+        tone="danger"
+        title="清空当前内容？"
+        description="清空后本页的转录与答案将无法恢复，历史记录不受影响。"
+        confirmLabel="清空"
+        busy={clearing}
+        onCancel={() => setShowClearConfirm(false)}
+        onConfirm={() => {
+          setShowClearConfirm(false)
+          void performClear()
+        }}
+      >
+        <ul className="space-y-1.5">
+          <li className="flex items-center justify-between gap-3 rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
+            <span className="text-text-muted">实时转录</span>
+            <span className="font-medium text-text-primary">{transcriptions.length} 条</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
+            <span className="text-text-muted">AI 答案</span>
+            <span className="font-medium text-text-primary">{qaPairs.length} 条</span>
+          </li>
+          {candidateTranscriptions.length > 0 ? (
+            <li className="flex items-center justify-between gap-3 rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
+              <span className="text-text-muted">候选人语音</span>
+              <span className="font-medium text-text-primary">{candidateTranscriptions.length} 条</span>
+            </li>
+          ) : null}
+        </ul>
+      </ConfirmDialog>
     </div>
   )
 }

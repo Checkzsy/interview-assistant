@@ -3,6 +3,7 @@ import { Upload, Trash2, RefreshCw, FileText, FileType2, UploadCloud } from 'luc
 import { useKbStore } from '@/stores/kbStore'
 import { useInterviewStore } from '@/stores/configStore'
 import { api } from '@/lib/api'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 
 function toast(msg: string) {
   useInterviewStore.getState().setToastMessage(msg)
@@ -43,6 +44,7 @@ export default function KbFilesPanel({ onChanged }: Props) {
   const [uploading, setUploading] = useState(false)
   const [busyPath, setBusyPath] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadingRef = useRef(false)
@@ -147,9 +149,12 @@ export default function KbFilesPanel({ onChanged }: Props) {
     if (files.length) await handleUploadMany(files)
   }
 
-  const handleDelete = async (path: string) => {
+  const handleDelete = (path: string) => {
     if (uploadingRef.current || busyPathRef.current) return
-    if (!confirm(`确定删除 ${path}? 文件和索引都会被移除。`)) return
+    setDeleteTarget(path)
+  }
+
+  const performDelete = async (path: string) => {
     if (!beginBusy(path)) return
     setError(null)
     try {
@@ -327,6 +332,26 @@ export default function KbFilesPanel({ onChanged }: Props) {
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        tone="danger"
+        title="删除这个知识库文件？"
+        description="文件与它的索引都会被移除。"
+        confirmLabel="删除"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          const target = deleteTarget
+          setDeleteTarget(null)
+          if (target != null) void performDelete(target)
+        }}
+      >
+        {deleteTarget ? (
+          <div className="break-all rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2 font-mono text-[11px] text-text-primary">
+            {deleteTarget}
+          </div>
+        ) : null}
+      </ConfirmDialog>
     </div>
   )
 }

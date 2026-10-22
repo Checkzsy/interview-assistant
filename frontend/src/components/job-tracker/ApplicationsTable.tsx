@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { Application, ApplicationReviewSummary, Offer, Stage, TodoItem } from './types'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { filterApplicationsBySearch } from './search'
 import {
   getStageOrderIndex,
@@ -306,6 +307,7 @@ export default function ApplicationsTable({
   const [extrasOpen, setExtrasOpen] = useState(false)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [pendingDetailFocusId, setPendingDetailFocusId] = useState<number | null>(null)
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<Application | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
   const savingRef = useRef(false)
   const patch = useMemo(
@@ -639,6 +641,30 @@ export default function ApplicationsTable({
       ? 'flex min-h-0 flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.88fr)] xl:items-start'
       : 'flex flex-col gap-3'}
     >
+      <ConfirmDialog
+        open={deleteConfirmTarget != null}
+        tone="danger"
+        title="删除这条投递记录？"
+        description="与该岗位关联的复盘、待办和 Offer 数据也会一并移除。"
+        confirmLabel="删除"
+        onCancel={() => setDeleteConfirmTarget(null)}
+        onConfirm={() => {
+          const target = deleteConfirmTarget
+          setDeleteConfirmTarget(null)
+          if (target) onDelete(target.id)
+        }}
+      >
+        {deleteConfirmTarget ? (
+          <div className="rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
+            <div className="text-sm font-semibold text-text-primary">
+              {deleteConfirmTarget.company || '未命名公司'}
+            </div>
+            <div className="mt-0.5 text-xs text-text-muted">
+              {deleteConfirmTarget.position || '岗位未填写'}
+            </div>
+          </div>
+        ) : null}
+      </ConfirmDialog>
       <section
         className={`overflow-hidden ${desktopSplitLayout ? `min-w-0 rounded-lg border ${workspaceShellClass}` : `rounded-lg border ${standalonePanelClass}`}`}
       >
@@ -1321,9 +1347,7 @@ export default function ApplicationsTable({
                             </p>
                             <button
                               type="button"
-                              onClick={() => {
-                                if (confirm(`删除「${current.company}」这条记录？`)) onDelete(current.id)
-                              }}
+                              onClick={() => setDeleteConfirmTarget(current)}
                               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-red-500/20 px-3 py-2 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10"
                             >
                               <Trash2 className="h-3.5 w-3.5" />

@@ -1899,6 +1899,10 @@ def _process_question_parallel(
     def session_stale() -> bool:
         return sess_v != _task_session_version
 
+    def start_aborted() -> bool:
+        """任务真正开跑前的取消判定：会话过期或用户点了「取消生成」。"""
+        return session_stale() or my_gen != _answer_generation
+
     def aborted() -> bool:
         if session_stale():
             return True
@@ -1929,7 +1933,9 @@ def _process_question_parallel(
             broadcast=broadcast,
             logger=_ilog,
             error_logger=_elog,
-            start_abort_check=session_stale,
+            # 「开始前」也要认取消：/ask/cancel 会 bump generation，若这里只看
+            # session 版本，点了取消的排队任务仍会完整跑完一遍并推送答案。
+            start_abort_check=start_aborted,
             model_cfg_snapshot=model_cfg_snapshot,
             config_snapshot=config_snapshot,
         ),

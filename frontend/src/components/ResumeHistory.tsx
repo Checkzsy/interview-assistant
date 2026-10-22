@@ -3,6 +3,7 @@ import { ChevronDown, Loader2, CheckCircle2, AlertTriangle, FileText } from 'luc
 import { api, type ResumeHistoryDetail, type ResumeHistoryItem } from '@/lib/api'
 import { refreshConfig } from '@/lib/configSync'
 import { useInterviewStore } from '@/stores/configStore'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 
 function formatShort(ts: number) {
   try {
@@ -288,6 +289,7 @@ export function ResumeHistoryPopover({ className = '' }: { className?: string })
   const [items, setItems] = useState<ResumeHistoryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
   const [maxN, setMaxN] = useState(10)
   const wrapRef = useRef<HTMLDivElement>(null)
   const setToastMessage = useInterviewStore((s) => s.setToastMessage)
@@ -334,9 +336,12 @@ export function ResumeHistoryPopover({ className = '' }: { className?: string })
     }
   }
 
-  const onDelete = async (id: number, e: React.MouseEvent) => {
+  const onDelete = (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm('从历史中删除该文件？不可恢复。')) return
+    setDeleteTargetId(id)
+  }
+
+  const performDelete = async (id: number) => {
     setBusyId(id)
     try {
       await api.resumeHistoryDelete(id)
@@ -352,6 +357,20 @@ export function ResumeHistoryPopover({ className = '' }: { className?: string })
 
   return (
     <div ref={wrapRef} className={`relative flex items-stretch self-stretch ${className}`}>
+      <ConfirmDialog
+        open={deleteTargetId != null}
+        tone="danger"
+        title="从历史中删除该文件？"
+        description="删除后不可恢复。"
+        confirmLabel="删除"
+        busy={busyId != null}
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={() => {
+          const target = deleteTargetId
+          setDeleteTargetId(null)
+          if (target != null) void performDelete(target)
+        }}
+      />
       <ResumeHistoryDetailModal
         entryId={detailId}
         onClose={() => setDetailId(null)}
@@ -408,6 +427,7 @@ export function ResumeHistoryPanel() {
   const [items, setItems] = useState<ResumeHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
   const [maxN, setMaxN] = useState(10)
   const setToastMessage = useInterviewStore((s) => s.setToastMessage)
 
@@ -442,9 +462,12 @@ export function ResumeHistoryPanel() {
     }
   }
 
-  const onDelete = async (id: number, e: React.MouseEvent) => {
+  const onDelete = (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm('从历史中删除该文件？不可恢复。')) return
+    setDeleteTargetId(id)
+  }
+
+  const performDelete = async (id: number) => {
     setBusyId(id)
     try {
       await api.resumeHistoryDelete(id)
@@ -460,6 +483,20 @@ export function ResumeHistoryPanel() {
 
   return (
     <div className="rounded-lg border border-bg-tertiary bg-bg-tertiary/30 p-2 space-y-2">
+      <ConfirmDialog
+        open={deleteTargetId != null}
+        tone="danger"
+        title="从历史中删除该文件？"
+        description="删除后不可恢复。"
+        confirmLabel="删除"
+        busy={busyId != null}
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={() => {
+          const target = deleteTargetId
+          setDeleteTargetId(null)
+          if (target != null) void performDelete(target)
+        }}
+      />
       <ResumeHistoryDetailModal
         entryId={detailId}
         onClose={() => setDetailId(null)}

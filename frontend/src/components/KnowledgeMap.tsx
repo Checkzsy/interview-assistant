@@ -3,6 +3,7 @@ import { api, getErrorMessage } from '@/lib/api'
 import { useInterviewStore } from '@/stores/configStore'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 import { RefreshCw, Trash2, ChevronDown, ChevronUp, Target, TrendingUp, TrendingDown, Minus, Sparkles, Mic, BookOpen, Loader2, AlertCircle } from 'lucide-react'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import {
   ASSIST_MERGE_GAP_SEC,
   mergeHistoryByTimeGap,
@@ -124,6 +125,7 @@ export default function KnowledgeMap() {
   const [firstLoaded, setFirstLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [genLoading, setGenLoading] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [inputMonitorStatus, setInputMonitorStatus] = useState<InputMonitorStatus | null>(null)
   const [inputMonitorError, setInputMonitorError] = useState<string | null>(null)
   const setAppMode = useUiPrefsStore((s) => s.setAppMode)
@@ -211,8 +213,11 @@ export default function KnowledgeMap() {
     }
   }
 
-  const handleReset = async () => {
-    if (!confirm('确定要清空所有知识记录吗？清空后不可恢复。')) return
+  const handleReset = () => {
+    setShowResetConfirm(true)
+  }
+
+  const performReset = async () => {
     try {
       await api.knowledgeReset()
       loadData()
@@ -576,6 +581,19 @@ export default function KnowledgeMap() {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={showResetConfirm}
+        tone="danger"
+        title="清空所有知识记录？"
+        description="清空后能力画像与历史记录都无法恢复。"
+        confirmLabel="清空"
+        onCancel={() => setShowResetConfirm(false)}
+        onConfirm={() => {
+          setShowResetConfirm(false)
+          void performReset()
+        }}
+      />
     </div>
   )
 }

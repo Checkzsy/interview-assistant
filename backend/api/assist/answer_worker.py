@@ -722,6 +722,10 @@ def process_question_parallel(
     if model_cfg is None:
         model_cfg = cfg.models[model_idx]
     if deps.start_abort_check is not None and deps.start_abort_check():
+        # 这里保持静默：任务还没 start，前端从未收到过 answer_start / 卡片，
+        # 发 answer_cancelled 只会给一个前端不认识的 id 制造噪声。
+        # 卡住不恢复的场景由前端 handleCancelAsk 的超时兜底处理。
+        deps.logger.info("ANSWER_CANCEL_BEFORE_START id=%s", qa_id)
         deps.mark_seq_skipped(seq)
         return
 

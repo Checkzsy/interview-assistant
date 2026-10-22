@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useUiSettings } from '@/stores/hooks'
 import { INPUT_FIELD_STYLE, SettingsSearchContext } from './shared'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import PreferencesTab from './PreferencesTab'
 
 const SpeechTab = lazy(() => import('./SpeechTab'))
@@ -25,6 +26,9 @@ export default function SettingsDrawer() {
   const [searchQuery, setSearchQuery] = useState('')
   const [noResults, setNoResults] = useState(false)
   const [dirtyExplicitSections, setDirtyExplicitSections] = useState<Record<string, boolean>>({})
+  const [pendingAction, setPendingAction] = useState<
+    { type: 'close' } | { type: 'tab'; tab: 'general' | 'config' | 'models' } | null
+  >(null)
   const dirtyExplicitCount = Object.values(dirtyExplicitSections).filter(Boolean).length
   const dirtyExplicitLabels = [
     dirtyExplicitSections.speech ? '语音配置' : null,
@@ -46,20 +50,33 @@ export default function SettingsDrawer() {
   }, [dirtyExplicitCount])
 
   const closeSettings = useCallback(() => {
-    if (dirtyExplicitCountRef.current > 0 && !window.confirm('有未保存更改，关闭后会丢失。')) {
-      return false
+    if (dirtyExplicitCountRef.current > 0) {
+      // 有未保存改动时挂起动作，交给统一确认框，确认后再真正关闭。
+      setPendingAction({ type: 'close' })
+      return
     }
     toggleSettings()
-    return true
   }, [toggleSettings])
 
   const changeTab = useCallback((tab: typeof settingsDrawerTab) => {
     if (tab === settingsDrawerTab) return
-    if (dirtyExplicitCountRef.current > 0 && !window.confirm('有未保存更改，切换后会丢失。')) {
+    if (dirtyExplicitCountRef.current > 0) {
+      setPendingAction({ type: 'tab', tab })
       return
     }
     setSettingsDrawerTab(tab)
   }, [setSettingsDrawerTab, settingsDrawerTab])
+
+  const confirmPendingAction = useCallback(() => {
+    const action = pendingAction
+    setPendingAction(null)
+    if (!action) return
+    if (action.type === 'close') {
+      toggleSettings()
+      return
+    }
+    setSettingsDrawerTab(action.tab)
+  }, [pendingAction, setSettingsDrawerTab, toggleSettings])
 
   // 检查搜索是否有命中 (仅 general/config tab 判断, 兼容 lazy tab 的挂载时序)
   useEffect(() => {
@@ -294,6 +311,23 @@ export default function SettingsDrawer() {
       </div>
 
       <style>{INPUT_FIELD_STYLE}</style>
+
+      <ConfirmDialog
+        open={pendingAction != null}
+        tone="default"
+        title={pendingAction?.type === 'tab' ? '切换前放弃未保存的更改？' : '关闭前放弃未保存的更改？'}
+        description="未保存的改动会丢失。"
+        confirmLabel={pendingAction?.type === 'tab' ? '放弃并切换' : '放弃并关闭'}
+        cancelLabel="继续编辑"
+        onCancel={() => setPendingAction(null)}
+        onConfirm={confirmPendingAction}
+      >
+        {dirtyExplicitLabels.length > 0 ? (
+          <div className="rounded-lg border border-accent-amber/30 bg-accent-amber/10 px-3 py-2 text-accent-amber">
+            未保存：{dirtyExplicitLabels.join(' · ')}
+          </div>
+        ) : null}
+      </ConfirmDialog>
     </>
   )
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsDrawer from './index'
@@ -87,7 +87,6 @@ describe('SettingsDrawer', () => {
     outsideButton.textContent = 'outside'
     document.body.appendChild(outsideButton)
     outsideButton.focus()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     render(<SettingsDrawer />)
 
@@ -99,6 +98,10 @@ describe('SettingsDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
 
+    // 未保存改动改由自绘确认框接管，不再是 window.confirm
+    const dialog = await screen.findByRole('dialog', { name: '关闭前放弃未保存的更改？' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '放弃并关闭' }))
+
     await waitFor(() => {
       expect(document.activeElement).toBe(outsideButton)
     })
@@ -106,7 +109,6 @@ describe('SettingsDrawer', () => {
   })
 
   it('asks before switching tabs with unsaved explicit settings', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<SettingsDrawer />)
 
     const modelSelect = await screen.findByDisplayValue('base')
@@ -117,7 +119,13 @@ describe('SettingsDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /模型/ }))
 
-    expect(confirmSpy).toHaveBeenCalledWith('有未保存更改，切换后会丢失。')
+    const dialog = await screen.findByRole('dialog', { name: '切换前放弃未保存的更改？' })
+    // 选「继续编辑」应留在原 Tab
+    fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '切换前放弃未保存的更改？' })).not.toBeInTheDocument()
+    })
     expect(screen.getByText('语音链路')).toBeInTheDocument()
   })
 
