@@ -385,6 +385,8 @@ export const api = {
     request(`/api/review/sessions/${sessionId}`),
   reviewUpdateSession: (sessionId: number, data: { title?: string; company?: string; role?: string; application_id?: number | null }) =>
     request(`/api/review/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  reviewDeleteSession: (sessionId: number) =>
+    request<{ ok: boolean; session_id: number }>(`/api/review/sessions/${sessionId}`, { method: 'DELETE' }),
   reviewTriggerAnalysis: (sessionId: number) =>
     request<{ status: string; message: string }>(`/api/review/sessions/${sessionId}/generate`, { method: 'POST', body: '{}' }),
   reviewCreateManual: (data: { transcript: string; title?: string; company?: string; role?: string; analyze?: boolean }) =>

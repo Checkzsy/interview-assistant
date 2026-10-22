@@ -900,3 +900,43 @@ def _remove_review_todos_from_application(session_id: int, application_id: int) 
     job_tracker.patch_application(int(app["id"]), {"todos": next_todos})
     return True
 
+
+def delete_session(session_id: int) -> bool:
+    """删除一场复盘及其全部问答轮次，并清理同步到岗位的复盘待办。
+
+    返回 True 表示记录存在且已删除。
+
+    为什么显式删 review_turns：建表时外键没有声明 ON DELETE CASCADE（见 init_db），
+    只删 review_sessions 会留下孤儿 turn，列表统计和后续查询都会错乱。
+    两句 DELETE 放在同一事务里，任一失败整体回滚，避免「session 已删、turns 残留」。
+    """
+    sid = int(session_id)
+    application_id: Optional[int] = None
+    with _db_lock:
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT id, application_id FROM review_sessions WHERE id = ?", (sid,)
+            ).fetchone()
+            if not row:
+                conn.close()
+                return False
+            application_id = row["application_id"]
+            conn.execute("DELETE FROM review_turns WHERE session_id = ?", (sid,))
+            conn.execute("DELETE FROM review_sessions WHERE id = ?", (sid,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
+        conn.close()
+
+    # 待办清理要拿 job_tracker 自己的锁，必须在 _db_lock 之外执行，否则可能死锁。
+    # 清理失败不应让删除整体失败：复盘主体已删掉，残留待办用户可以手动处理。
+    if application_id:
+        try:
+            _remove_review_todos_from_application(sid, int(application_id))
+        except Exception:
+            pass
+    return True
+

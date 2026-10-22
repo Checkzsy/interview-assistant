@@ -168,6 +168,28 @@ async def update_session(session_id: int, req: UpdateSessionRequest):
         raise HTTPException(500, str(e))
 
 
+@router.delete("/review/sessions/{session_id}")
+async def delete_session(session_id: int):
+    """删除一场复盘记录（含问答明细与同步到岗位的复盘待办）。"""
+    detail = review.get_session_detail(session_id)
+    if not detail:
+        raise HTTPException(404, "Session not found")
+
+    # 录制中/分析中的会话直接删会打断后台任务并留下半成品数据，要求先结束后再删。
+    status = str(detail.get("status") or "")
+    if status in ("recording", "analyzing"):
+        raise HTTPException(409, "该复盘正在录制或分析中，请结束后再删除")
+
+    try:
+        deleted = review.delete_session(session_id)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    if not deleted:
+        raise HTTPException(404, "Session not found")
+    return {"ok": True, "session_id": session_id}
+
+
 @router.post("/review/asr-correction-test")
 async def test_asr_correction(req: AsrCorrectionTestRequest):
     """测试当前复盘模型是否可用于 ASR 纠错。"""

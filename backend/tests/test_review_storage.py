@@ -684,3 +684,77 @@ def test_application_review_summary_uses_latest_session(tmp_path, monkeypatch):
     assert summary["latest_review_id"] == latest_id
     assert summary["latest_linked_review_id"] == latest_id
     assert summary["latest_avg_score"] == 8.0
+
+
+def test_delete_session_removes_session_and_turns():
+    """删除复盘时要连 turn 一起删，不能留下孤儿记录。"""
+    session_id = review.create_session(time.time(), True, True)
+    for idx in range(3):
+        review.add_turn(
+            session_id=session_id,
+            qa_id=f"q-{idx}",
+            seq=idx + 1,
+            question_text=f"问题 {idx + 1}",
+            candidate_answer_text=f"回答 {idx + 1}",
+        )
+    review.end_session(session_id, status="completed", ended_at=time.time())
+
+    assert review.delete_session(session_id) is True
+
+    assert review.get_session_detail(session_id) is None
+    assert review.list_sessions()["total"] == 0
+    # 直接查库确认没有孤儿 turn
+    import sqlite3
+    conn = sqlite3.connect(review.DB_PATH)
+    leftover = conn.execute(
+        "SELECT COUNT(*) FROM review_turns WHERE session_id = ?", (session_id,)
+    ).fetchone()[0]
+    conn.close()
+    assert leftover == 0
+
+
+def test_delete_session_missing_returns_false():
+    """删除不存在的会话返回 False，而不是抛异常。"""
+    assert review.delete_session(999999) is False
+
+
+def test_delete_session_keeps_other_sessions():
+    """只删目标会话，其他复盘不受影响。"""
+    keep_id = review.create_session(time.time(), True, True)
+    review.add_turn(
+        session_id=keep_id,
+        qa_id="keep-1",
+        seq=1,
+        question_text="保留的问题",
+        candidate_answer_text="保留的回答",
+    )
+    doomed_id = review.create_session(time.time() - 10, True, True)
+
+    assert review.delete_session(doomed_id) is True
+
+    remaining = review.list_sessions()
+    assert remaining["total"] == 1
+    assert remaining["items"][0]["id"] == keep_id
+    assert review.get_session_detail(keep_id)["turn_count"] == 1
+
+
+def test_delete_session_cleans_linked_application_todos():
+    """删除复盘后，同步到岗位待办里的 review-<id>- 条目应被清掉。"""
+    from services.storage import job_tracker
+
+    app = job_tracker.create_application({"company": "测试公司", "position": "后端开发"})
+    session_id = review.create_session(
+        time.time(), True, True, application_id=app["id"]
+    )
+    prefix = f"review-{session_id}-"
+    job_tracker.patch_application(app["id"], {
+        "todos": [
+            {"id": f"{prefix}weak-1", "title": "复盘补强：测试", "done": False},
+            {"id": "manual-todo", "title": "我自己加的待办", "done": False},
+        ]
+    })
+
+    assert review.delete_session(session_id) is True
+
+    todos = job_tracker.get_application(app["id"])["todos"]
+    assert [todo["id"] for todo in todos] == ["manual-todo"]

@@ -10,6 +10,7 @@ const apiMock = vi.hoisted(() => ({
   reviewTriggerAnalysis: vi.fn(),
   reviewCreateManual: vi.fn(),
   reviewAsrCorrectionTest: vi.fn(),
+  reviewDeleteSession: vi.fn(),
 }))
 
 vi.mock('../../lib/api', () => ({
@@ -55,6 +56,7 @@ describe('ReviewSessionList', () => {
     apiMock.reviewTriggerAnalysis.mockReset()
     apiMock.reviewCreateManual.mockReset()
     apiMock.reviewAsrCorrectionTest.mockReset()
+    apiMock.reviewDeleteSession.mockReset()
 
     useInterviewStore.setState({
       config: {
@@ -622,5 +624,73 @@ describe('ReviewSessionList', () => {
     expect(await screen.findByText('剩余复盘')).toBeInTheDocument()
     expect(screen.queryByText('没有复盘记录')).not.toBeInTheDocument()
     expect(apiMock.reviewSessions).toHaveBeenLastCalledWith(1, 20)
+  })
+
+  it('deletes a review session after confirming in the dialog and refreshes the list', async () => {
+    apiMock.reviewDeleteSession.mockResolvedValue({ ok: true, session_id: 1 })
+    apiMock.reviewSessions
+      .mockResolvedValueOnce({
+        total: 1,
+        page: 1,
+        page_size: 20,
+        items: [reviewSession(1, '待删除复盘')],
+      })
+      .mockResolvedValueOnce({ total: 0, page: 1, page_size: 20, items: [] })
+
+    render(<ReviewSessionList onViewDetail={vi.fn()} />)
+
+    await screen.findByText('待删除复盘')
+    fireEvent.click(screen.getByRole('button', { name: /删除 待删除复盘 复盘/ }))
+
+    // 打开自绘确认框，而不是浏览器原生 confirm
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('删除这条复盘？')
+    expect(apiMock.reviewDeleteSession).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(apiMock.reviewDeleteSession).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(apiMock.reviewSessions).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('closes the dialog without deleting when cancelled', async () => {
+    apiMock.reviewSessions.mockResolvedValue({
+      total: 1,
+      page: 1,
+      page_size: 20,
+      items: [reviewSession(1, '待删除复盘')],
+    })
+
+    render(<ReviewSessionList onViewDetail={vi.fn()} />)
+
+    await screen.findByText('待删除复盘')
+    fireEvent.click(screen.getByRole('button', { name: /删除 待删除复盘 复盘/ }))
+    await screen.findByRole('dialog')
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(apiMock.reviewDeleteSession).not.toHaveBeenCalled()
+  })
+
+  it('closes the dialog on Escape without deleting', async () => {
+    apiMock.reviewSessions.mockResolvedValue({
+      total: 1,
+      page: 1,
+      page_size: 20,
+      items: [reviewSession(1, '待删除复盘')],
+    })
+
+    render(<ReviewSessionList onViewDetail={vi.fn()} />)
+
+    await screen.findByText('待删除复盘')
+    fireEvent.click(screen.getByRole('button', { name: /删除 待删除复盘 复盘/ }))
+    await screen.findByRole('dialog')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(apiMock.reviewDeleteSession).not.toHaveBeenCalled()
   })
 })

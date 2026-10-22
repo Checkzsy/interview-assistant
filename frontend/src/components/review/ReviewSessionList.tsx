@@ -12,6 +12,7 @@ import {
   Loader2,
   Upload,
   RefreshCw,
+  Trash2,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../../lib/api'
 import { useInterviewStore } from '../../stores/configStore'
@@ -21,6 +22,7 @@ import { isLightColorScheme } from '@/lib/colorScheme'
 import type { ReviewSession, ReviewSessionsResponse } from './types'
 import { parseReviewSessionsResponse } from './types'
 import { getReviewSourceMeta, isWrittenExamReview } from './sourceMeta'
+import DeleteReviewDialog from './DeleteReviewDialog'
 
 const STATUS_LABELS: Record<ReviewSession['status'], string> = {
   recording: '录制中',
@@ -96,6 +98,8 @@ export default function ReviewSessionList({ onViewDetail }: Props) {
   const [showSettings, setShowSettings] = useState(false)
   const [showManualImport, setShowManualImport] = useState(false)
   const [triggeringIds, setTriggeringIds] = useState<Set<number>>(new Set())
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [deleteTarget, setDeleteTarget] = useState<ReviewSession | null>(null)
   const [focusFilter, setFocusFilter] = useState<ReviewListFocus>('all')
   const [pendingReviewEnabled, setPendingReviewEnabled] = useState<boolean | null>(null)
   const [pendingReviewModelIndex, setPendingReviewModelIndex] = useState<number | null>(null)
@@ -249,6 +253,34 @@ export default function ReviewSessionList({ onViewDetail }: Props) {
     })
     setAppMode('job-tracker')
   }, [setAppMode, setJobTrackerDeepLink])
+
+  const handleDeleteSession = useCallback((session: ReviewSession) => {
+    if (deletingIds.has(session.id)) return
+    // 删除不可撤销，且会连带清掉岗位待办：先弹自绘确认框，不用浏览器原生 confirm。
+    setDeleteTarget(session)
+  }, [deletingIds])
+
+  const confirmDeleteSession = useCallback(async () => {
+    const session = deleteTarget
+    if (!session) return
+    setDeletingIds(prev => new Set(prev).add(session.id))
+    try {
+      await api.reviewDeleteSession(session.id)
+      setToastMessage('已删除复盘记录')
+      setDeleteTarget(null)
+      // 删除后当前页可能已空，loadSessions 会自动回退到最后一个有效页。
+      await loadSessions(page, { silent: true })
+    } catch (err) {
+      setToastMessage(getErrorMessage(err, '删除复盘失败'))
+      setDeleteTarget(null)
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev)
+        next.delete(session.id)
+        return next
+      })
+    }
+  }, [deleteTarget, loadSessions, page, setToastMessage])
 
   const sessions = data?.items ?? []
   const hasAnalyzingSession = sessions.some((session) => session.status === 'analyzing')
@@ -440,9 +472,11 @@ export default function ReviewSessionList({ onViewDetail }: Props) {
                 linkedReviewCounts={linkedReviewCounts}
                 linkedTimelineLabels={linkedTimelineLabels}
                 triggeringIds={triggeringIds}
+                deletingIds={deletingIds}
                 onViewDetail={onViewDetail}
                 onOpenApplication={handleOpenApplication}
                 onTriggerAnalysis={handleTriggerAnalysis}
+                onDelete={handleDeleteSession}
                 hasGeneratedAnalysis={sessionHasGeneratedAnalysis}
               />
 
@@ -483,6 +517,13 @@ export default function ReviewSessionList({ onViewDetail }: Props) {
         {!hasSessions ? configPanels : null}
 
       </div>
+
+      <DeleteReviewDialog
+        session={deleteTarget}
+        deleting={deleteTarget != null && deletingIds.has(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => { void confirmDeleteSession() }}
+      />
     </div>
   )
 }
@@ -774,9 +815,11 @@ function SessionTable({
   linkedReviewCounts,
   linkedTimelineLabels,
   triggeringIds,
+  deletingIds,
   onViewDetail,
   onOpenApplication,
   onTriggerAnalysis,
+  onDelete,
   hasGeneratedAnalysis,
 }: {
   sessions: ReviewSession[]
@@ -784,9 +827,11 @@ function SessionTable({
   linkedReviewCounts: Map<number, number>
   linkedTimelineLabels: Map<number, string>
   triggeringIds: Set<number>
+  deletingIds: Set<number>
   onViewDetail: (sessionId: number) => void
   onOpenApplication: (session: ReviewSession) => void
   onTriggerAnalysis: (sessionId: number) => void
+  onDelete: (session: ReviewSession) => void
   hasGeneratedAnalysis: (session: ReviewSession) => boolean
 }) {
   const groups = buildSessionGroups(sessions, hasGeneratedAnalysis)
@@ -818,10 +863,12 @@ function SessionTable({
                 linkedReviewCounts={linkedReviewCounts}
                 linkedTimelineLabels={linkedTimelineLabels}
                 triggeringIds={triggeringIds}
+                deletingIds={deletingIds}
                 hasGeneratedAnalysis={hasGeneratedAnalysis}
                 onViewDetail={onViewDetail}
                 onOpenApplication={onOpenApplication}
                 onTriggerAnalysis={onTriggerAnalysis}
+                onDelete={onDelete}
               />
             ))}
           </div>
@@ -836,19 +883,23 @@ function ReviewTimelineCluster({
   linkedReviewCounts,
   linkedTimelineLabels,
   triggeringIds,
+  deletingIds,
   hasGeneratedAnalysis,
   onViewDetail,
   onOpenApplication,
   onTriggerAnalysis,
+  onDelete,
 }: {
   cluster: SessionCluster
   linkedReviewCounts: Map<number, number>
   linkedTimelineLabels: Map<number, string>
   triggeringIds: Set<number>
+  deletingIds: Set<number>
   hasGeneratedAnalysis: (session: ReviewSession) => boolean
   onViewDetail: (sessionId: number) => void
   onOpenApplication: (session: ReviewSession) => void
   onTriggerAnalysis: (sessionId: number) => void
+  onDelete: (session: ReviewSession) => void
 }) {
   const timelineCount = cluster.application?.id != null ? linkedReviewCounts.get(cluster.application.id) ?? cluster.items.length : cluster.items.length
   const showTimelineHeader = Boolean(cluster.application?.id) && cluster.items.length > 1
@@ -887,9 +938,11 @@ function ReviewTimelineCluster({
               showTriggerButton={showTriggerButton}
               timelineLabel={linkedTimelineLabels.get(session.id) ?? (showTimelineHeader ? describeTimelinePosition(index, cluster.items.length) : null)}
               compactLinkedApplication={showTimelineHeader}
+              isDeleting={deletingIds.has(session.id)}
               onViewDetail={onViewDetail}
               onOpenApplication={onOpenApplication}
               onTriggerAnalysis={onTriggerAnalysis}
+              onDelete={onDelete}
             />
           )
         })}
@@ -907,9 +960,11 @@ function ReviewQueueRow({
   showTriggerButton,
   timelineLabel,
   compactLinkedApplication,
+  isDeleting,
   onViewDetail,
   onOpenApplication,
   onTriggerAnalysis,
+  onDelete,
 }: {
   session: ReviewSession
   linkedReviewCount: number | null
@@ -919,9 +974,11 @@ function ReviewQueueRow({
   showTriggerButton: boolean
   timelineLabel: string | null
   compactLinkedApplication: boolean
+  isDeleting: boolean
   onViewDetail: (sessionId: number) => void
   onOpenApplication: (session: ReviewSession) => void
   onTriggerAnalysis: (sessionId: number) => void
+  onDelete: (session: ReviewSession) => void
 }) {
   const showLinkedApplication = Boolean(session.application)
   const showScore = session.avg_score != null
@@ -932,7 +989,6 @@ function ReviewQueueRow({
   const timeText = dayjs.unix(Math.floor(session.started_at)).format('MM-DD HH:mm')
   const turnsText = `${session.turn_count}${sourceMeta.unit}`
   const summary = sessionSummary(session)
-  const hasPrimaryTrigger = showTriggerButton || isTriggering
   const linkedApplicationName = `${session.application?.company || '未命名公司'} · ${session.application?.position || '岗位'}`
   const metaParts = [
     showScore ? `${session.avg_score?.toFixed(1)}分` : null,
@@ -959,7 +1015,7 @@ function ReviewQueueRow({
       <div className="flex gap-2.5">
         <div className={`hidden w-1 shrink-0 rounded-sm md:block ${sessionRailTone(session.status)}`} />
         <div className="min-w-0 flex-1">
-          <div className={`grid gap-2 ${hasPrimaryTrigger ? 'xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start' : ''}`}>
+          <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h4 className="text-sm font-semibold tracking-tight text-text-primary">{title}</h4>
@@ -1014,34 +1070,47 @@ function ReviewQueueRow({
               ) : null}
             </div>
 
-            {hasPrimaryTrigger ? (
-              <div className="flex flex-wrap items-center gap-2 xl:min-w-[188px] xl:flex-col xl:items-end xl:justify-start">
-                {showTriggerButton ? (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onTriggerAnalysis(session.id)
-                    }}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${
-                      session.status === 'analysis_failed'
-                        ? 'border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15'
-                        : 'border-green-500/20 bg-green-500/10 text-green-500 hover:bg-green-500/15'
-                    }`}
-                  >
-                    {session.status === 'analysis_failed' ? <RotateCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-                    {session.status === 'analysis_failed' ? '重试生成' : '生成复盘'}
-                  </button>
-                ) : null}
+            <div className="flex flex-wrap items-center gap-2 xl:min-w-[188px] xl:flex-col xl:items-end xl:justify-start">
+              {showTriggerButton ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onTriggerAnalysis(session.id)
+                  }}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${
+                    session.status === 'analysis_failed'
+                      ? 'border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15'
+                      : 'border-green-500/20 bg-green-500/10 text-green-500 hover:bg-green-500/15'
+                  }`}
+                >
+                  {session.status === 'analysis_failed' ? <RotateCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {session.status === 'analysis_failed' ? '重试生成' : '生成复盘'}
+                </button>
+              ) : null}
 
-                {isTriggering ? (
-                  <span className="inline-flex h-9 items-center gap-1.5 px-2 text-xs text-text-muted">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    提交中
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
+              {isTriggering ? (
+                <span className="inline-flex h-9 items-center gap-1.5 px-2 text-xs text-text-muted">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  提交中
+                </span>
+              ) : null}
+
+              <button
+                type="button"
+                aria-label={`删除 ${title} 复盘`}
+                title="删除这条复盘"
+                disabled={isDeleting}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onDelete(session)
+                }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-bg-hover bg-bg-secondary px-2.5 text-xs font-medium text-text-muted transition-colors hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {isDeleting ? '删除中' : '删除'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

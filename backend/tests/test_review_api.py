@@ -550,3 +550,47 @@ def test_generate_returns_done_for_completed_session_with_analysis(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["status"] == "done"
     assert started_analysis == []
+
+
+def test_delete_session_api_removes_record():
+    session_id = review.create_session(
+        started_at=time.time(),
+        interviewer_enabled=True,
+        candidate_enabled=True,
+    )
+    review.add_turn(
+        session_id=session_id,
+        qa_id="del-1",
+        seq=1,
+        question_text="要删掉的问题",
+        candidate_answer_text="回答",
+    )
+    review.end_session(session_id, status="completed", ended_at=time.time())
+
+    resp = client.delete(f"/api/review/sessions/{session_id}")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "session_id": session_id}
+    assert review.get_session_detail(session_id) is None
+    assert client.get(f"/api/review/sessions/{session_id}").status_code == 404
+
+
+def test_delete_session_api_returns_404_for_missing():
+    resp = client.delete("/api/review/sessions/424242")
+
+    assert resp.status_code == 404
+
+
+def test_delete_session_api_rejects_analyzing_session():
+    """分析中的会话不允许删除，避免打断后台任务。"""
+    session_id = review.create_session(
+        started_at=time.time(),
+        interviewer_enabled=True,
+        candidate_enabled=True,
+    )
+    review.update_session_status(session_id, "analyzing")
+
+    resp = client.delete(f"/api/review/sessions/{session_id}")
+
+    assert resp.status_code == 409
+    assert review.get_session_detail(session_id) is not None
