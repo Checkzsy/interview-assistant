@@ -161,7 +161,7 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-bg-hover bg-bg-tertiary/20">
           {saveError ? <p role="alert" className="min-w-0 text-xs text-accent-red">{saveError}</p> : <span />}
           <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-xs rounded-xl border border-bg-hover hover:bg-bg-tertiary transition-all duration-150 active:scale-95 shadow-xs disabled:opacity-50">
+            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-xs rounded-xl border border-bg-hover hover:bg-bg-tertiary transition-all duration-150 active:scale-95 shadow-sm disabled:opacity-50">
               取消
             </button>
             <button
@@ -189,7 +189,7 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
         }
         .input-jt:focus {
           border-color: rgb(var(--c-accent-blue));
-          box-shadow: 0 0 0 2px rgba(var(--c-accent-blue), 0.2);
+          box-shadow: 0 0 0 2px rgb(var(--c-accent-blue) / 0.2);
         }
       `}</style>
     </div>

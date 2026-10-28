@@ -10,7 +10,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { Application, ApplicationReviewSummary, Offer, Stage, TodoItem } from './types'
-import ConfirmDialog from '@/components/common/ConfirmDialog'
+import DeleteApplicationDialog from './DeleteApplicationDialog'
 import { filterApplicationsBySearch } from './search'
 import {
   getStageOrderIndex,
@@ -634,37 +634,22 @@ export default function ApplicationsTable({
   const quickProgressTitle = currentIsTerminal ? '改结果' : '更新进度'
   const headerQuickProgressShellClass = isLight
     ? 'border-bg-hover bg-bg-secondary/25'
-    : 'border-white/[0.08] bg-black/12'
+    : 'border-white/[0.08] bg-black/10'
 
   return (
     <div className={desktopSplitLayout
       ? 'flex min-h-0 flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.88fr)] xl:items-start'
       : 'flex flex-col gap-3'}
     >
-      <ConfirmDialog
-        open={deleteConfirmTarget != null}
-        tone="danger"
-        title="删除这条投递记录？"
-        description="与该岗位关联的复盘、待办和 Offer 数据也会一并移除。"
-        confirmLabel="删除"
+      <DeleteApplicationDialog
+        target={deleteConfirmTarget}
         onCancel={() => setDeleteConfirmTarget(null)}
         onConfirm={() => {
           const target = deleteConfirmTarget
           setDeleteConfirmTarget(null)
           if (target) onDelete(target.id)
         }}
-      >
-        {deleteConfirmTarget ? (
-          <div className="rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
-            <div className="text-sm font-semibold text-text-primary">
-              {deleteConfirmTarget.company || '未命名公司'}
-            </div>
-            <div className="mt-0.5 text-xs text-text-muted">
-              {deleteConfirmTarget.position || '岗位未填写'}
-            </div>
-          </div>
-        ) : null}
-      </ConfirmDialog>
+      />
       <section
         className={`overflow-hidden ${desktopSplitLayout ? `min-w-0 rounded-lg border ${workspaceShellClass}` : `rounded-lg border ${standalonePanelClass}`}`}
       >
@@ -1348,7 +1333,7 @@ export default function ApplicationsTable({
                             <button
                               type="button"
                               onClick={() => setDeleteConfirmTarget(current)}
-                              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-500/25 px-3 py-2 text-xs font-semibold text-red-500 dark:text-red-400 transition-all duration-150 active:scale-95 hover:bg-red-500/10 shadow-xs"
+                              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-500/25 px-3 py-2 text-xs font-semibold text-red-500 transition-all duration-150 active:scale-95 hover:bg-red-500/10 shadow-sm"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               删除这条记录

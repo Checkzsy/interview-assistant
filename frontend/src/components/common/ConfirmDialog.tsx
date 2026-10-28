@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 
 export type ConfirmDialogTone = 'default' | 'danger'
@@ -70,7 +71,9 @@ export default function ConfirmDialog({
     ? 'bg-accent-red text-white'
     : 'bg-accent-blue text-white'
 
-  return (
+  // 必须 portal 到 body：任何祖先带 backdrop-filter（如看板根节点的 backdrop-blur）
+  // 都会成为 fixed 定位的 containing block，遮罩会缩到该容器内而不是铺满视口。
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in"
       onClick={() => {
@@ -124,6 +127,7 @@ export default function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

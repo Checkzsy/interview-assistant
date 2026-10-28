@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type WheelEvent } from 'react'
+import { createPortal } from 'react-dom'
 import {
   DndContext,
   DragOverlay,
@@ -36,7 +37,7 @@ import {
 } from 'lucide-react'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 import { isLightColorScheme } from '@/lib/colorScheme'
-import ConfirmDialog from '@/components/common/ConfirmDialog'
+import DeleteApplicationDialog from './DeleteApplicationDialog'
 import type { Application } from './types'
 import { filterApplicationsBySearch } from './search'
 import {
@@ -136,17 +137,17 @@ function StageSelect({
       }`}
       value={value}
       disabled={disabled}
-      aria-label="\u9636\u6BB5"
+      aria-label="阶段"
       onChange={(e) => onChange(e.target.value)}
     >
-      <optgroup label="\u8FDB\u884C\u4E2D">
+      <optgroup label="进行中">
         {ONGOING_STAGES.map((s) => (
           <option key={s} value={s}>
             {STAGE_EMOJI[s]} {STAGE_LABELS[s] ?? s}
           </option>
         ))}
       </optgroup>
-      <optgroup label="\u5DF2\u7ED3\u675F">
+      <optgroup label="已结束">
         {TERMINAL_STAGES.map((s) => (
           <option key={s} value={s}>
             {STAGE_EMOJI[s]} {STAGE_LABELS[s] ?? s}
@@ -238,7 +239,7 @@ function SortableKanbanCard({
             ${sortDisabled || busy ? 'cursor-not-allowed opacity-30' : ''}
             ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted/60 hover:bg-white/[0.06] hover:text-text-primary'}
           `}
-          aria-label="\u62D6\u52A8\u6392\u5E8F"
+          aria-label="拖动排序"
           disabled={sortDisabled || busy}
           {...attributes}
           {...listeners}
@@ -398,11 +399,11 @@ function KanbanColumn({
             <span>{STAGE_LABELS[stage] ?? stage}</span>
           </h3>
           <p className={`text-[10px] mt-0.5 ${isLight ? 'text-gray-400' : 'text-text-muted'}`}>
-            {list.length} \u6761\u8BB0\u5F55
+            {list.length} 条记录
           </p>
         </div>
         <span
-          className={`flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[10px] font-bold shadow-xs ${
+          className={`flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[10px] font-bold shadow-sm ${
             list.length > 0
               ? `${theme.iconBg} ${theme.iconText}`
               : isLight
@@ -602,38 +603,22 @@ export default function KanbanBoard({
 
   return (
     <div
-      className={`flex h-full min-h-0 gap-3.5 rounded-2xl border p-3.5 md:p-4.5 shadow-sm transition-colors ${
+      className={`flex h-full min-h-0 gap-3.5 rounded-2xl border p-3.5 md:p-5 shadow-sm transition-colors ${
         isLight ? 'border-gray-200/90 bg-white/70 backdrop-blur-md' : 'border-white/[0.07] bg-bg-primary/50 backdrop-blur-md'
       }`}
     >
-      <ConfirmDialog
-        open={deleteTarget != null}
-        tone="danger"
-        title="删除这条投递记录？"
-        description="与该岗位关联的复盘、待办和 Offer 数据也会一并移除。"
-        confirmLabel="删除"
-        cancelLabel="取消"
+      <DeleteApplicationDialog
+        target={deleteTarget}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-      >
-        {deleteTarget ? (
-          <div className="rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
-            <div className="text-sm font-semibold text-text-primary">
-              {deleteTarget.company || '未命名公司'}
-            </div>
-            <div className="mt-0.5 text-xs text-text-muted">
-              {deleteTarget.position || '岗位未填写'}
-            </div>
-          </div>
-        ) : null}
-      </ConfirmDialog>
+      />
 
       {/* Left stage rail (desktop) */}
       <nav
         className={`hidden w-14 shrink-0 flex-col gap-1 md:flex ${
           isLight ? 'border-r border-gray-200 pr-2' : 'border-r border-white/[0.06] pr-2'
         }`}
-        aria-label="\u9636\u6BB5\u5BFC\u822A"
+        aria-label="阶段导航"
       >
         {visibleStages.map((st) => {
           const Icon = STAGE_HEADER_ICON[st] ?? LayoutGrid
@@ -671,7 +656,7 @@ export default function KanbanBoard({
         <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div
-              className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-xs ${
+              className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-sm ${
                 isLight ? 'bg-blue-500/10 text-blue-600' : 'bg-violet-500/20 text-violet-200'
               }`}
             >
@@ -679,10 +664,10 @@ export default function KanbanBoard({
             </div>
             <div>
               <h2 className={`text-sm font-bold tracking-tight ${isLight ? 'text-gray-800' : 'text-text-primary'}`}>
-                \u6C42\u804C\u7BA1\u9053
+                求职管道
               </h2>
               <p className={`text-[10px] mt-0.5 ${isLight ? 'text-gray-400' : 'text-text-muted'}`}>
-                {totalApps} \u6761 \u00B7 {sortDisabled ? '\u641C\u7D22\u4E2D' : '\u53EF\u6392\u5E8F'}
+                {totalApps} 条 · {sortDisabled ? '搜索中' : '可排序'}
               </p>
             </div>
           </div>
@@ -691,17 +676,17 @@ export default function KanbanBoard({
               <button
                 type="button"
                 onClick={() => onShowTerminalStagesChange(true)}
-                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-all duration-150 active:scale-95 shadow-xs ${
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-all duration-150 active:scale-95 shadow-sm ${
                   isLight
                     ? 'bg-red-50 text-red-600 ring-red-200 hover:bg-red-100'
                     : 'bg-red-500/15 text-red-200 ring-red-400/25 hover:bg-red-500/25'
                 }`}
               >
-                {terminalApplicationsCount} \u6761\u5728\u5DF2\u7ED3\u675F \u00B7 \u5C55\u5F00
+                {terminalApplicationsCount} 条在已结束 · 展开
               </button>
             ) : null}
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150 active:scale-98 ${
+              className={`flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150 active:scale-95 ${
                 isLight
                   ? 'border-gray-200 bg-white hover:bg-gray-50'
                   : 'border-white/[0.08] bg-black/20 hover:bg-white/[0.04]'
@@ -713,12 +698,12 @@ export default function KanbanBoard({
                 checked={showTerminalStages}
                 onChange={(e) => onShowTerminalStagesChange(e.target.checked)}
               />
-              \u663E\u793A\u5DF2\u7ED3\u675F
+              显示已结束
             </label>
-            <div className={`flex rounded-xl border p-0.5 shadow-xs ${isLight ? 'border-gray-200 bg-white/70' : 'border-bg-hover bg-bg-secondary/40'}`}>
+            <div className={`flex rounded-xl border p-0.5 shadow-sm ${isLight ? 'border-gray-200 bg-white/70' : 'border-bg-hover bg-bg-secondary/40'}`}>
               <button
                 type="button"
-                aria-label="\u5411\u5DE6"
+                aria-label="向左"
                 className={`rounded-lg p-1.5 transition-all duration-150 active:scale-90 ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted hover:bg-bg-hover hover:text-text-primary'}`}
                 onClick={() => scrollBy(-320)}
               >
@@ -726,7 +711,7 @@ export default function KanbanBoard({
               </button>
               <button
                 type="button"
-                aria-label="\u5411\u53F3"
+                aria-label="向右"
                 className={`rounded-lg p-1.5 transition-all duration-150 active:scale-90 ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted hover:bg-bg-hover hover:text-text-primary'}`}
                 onClick={() => scrollBy(320)}
               >
@@ -746,7 +731,7 @@ export default function KanbanBoard({
                 key={st}
                 type="button"
                 onClick={() => scrollToStage(st)}
-                className={`shrink-0 rounded-xl px-3 py-1.5 text-[10px] font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all duration-150 active:scale-95 shadow-xs ${
+                className={`shrink-0 rounded-xl px-3 py-1.5 text-[10px] font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all duration-150 active:scale-95 shadow-sm ${
                   isLight
                     ? 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
                     : 'bg-white/[0.06] border border-white/10 text-text-muted hover:border-white/20'
@@ -786,9 +771,15 @@ export default function KanbanBoard({
               />
             ))}
           </div>
-          <DragOverlay dropAnimation={dropAnimation}>
-            {activeApp ? <CardPreview app={activeApp} isLight={isLight} /> : null}
-          </DragOverlay>
+          {/* portal 到 body：DragOverlay 是 fixed 定位并按视口坐标计算，
+              而本组件根节点的 backdrop-blur 会成为其 containing block，
+              不 portal 则拖拽预览会整体偏移一个看板位移量。 */}
+          {createPortal(
+            <DragOverlay dropAnimation={dropAnimation}>
+              {activeApp ? <CardPreview app={activeApp} isLight={isLight} /> : null}
+            </DragOverlay>,
+            document.body,
+          )}
         </DndContext>
       </div>
     </div>

@@ -100,7 +100,7 @@ function ResumeHistoryDetailModal({
       }}
     >
       <div
-        className="animate-modal-pop-in bg-bg-secondary/98 backdrop-blur-xl border border-bg-tertiary/80 rounded-2xl shadow-2xl shadow-black/40 max-w-2xl w-full max-h-[85vh] flex flex-col"
+        className="animate-modal-pop-in bg-bg-secondary/95 backdrop-blur-xl border border-bg-tertiary/80 rounded-2xl shadow-2xl shadow-black/40 max-w-2xl w-full max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-tertiary gap-2">

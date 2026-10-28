@@ -198,7 +198,7 @@ export default function SettingsDrawer() {
   return (
     <>
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 animate-fade-in" onClick={closeSettings} />
-      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[520px] lg:w-[560px] bg-bg-secondary/98 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80">
+      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[520px] lg:w-[560px] bg-bg-secondary/95 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-bg-tertiary px-4 pt-4 pb-0 bg-bg-secondary/95">
           <div className="flex items-start justify-between mb-3">

@@ -90,7 +90,7 @@ export default function KnowledgeDrawer() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="kb-drawer-title"
-        className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[480px] bg-bg-secondary/98 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80"
+        className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[480px] bg-bg-secondary/95 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80"
       >
         <div className="flex-shrink-0 border-b border-bg-tertiary px-3 pt-3 pb-0">
           <div className="flex items-center justify-between mb-3 px-1">

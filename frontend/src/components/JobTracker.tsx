@@ -735,7 +735,7 @@ export default function JobTracker() {
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-bg-hover bg-bg-secondary text-accent-blue shadow-xs">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-bg-hover bg-bg-secondary text-accent-blue shadow-sm">
                 <Briefcase className="h-5 w-5" strokeWidth={2} />
               </div>
               <div className="space-y-0.5">
@@ -757,7 +757,7 @@ export default function JobTracker() {
                       setSearch('')
                     }
                   }}
-                  className={`w-full rounded-xl border py-2 pl-9 ${search ? 'pr-9' : 'pr-3'} text-sm text-text-primary placeholder:text-text-muted/70 focus:border-accent-blue/40 focus:outline-none focus:ring-2 focus:ring-accent-blue/15 transition-all shadow-xs ${
+                  className={`w-full rounded-xl border py-2 pl-9 ${search ? 'pr-9' : 'pr-3'} text-sm text-text-primary placeholder:text-text-muted/70 focus:border-accent-blue/40 focus:outline-none focus:ring-2 focus:ring-accent-blue/15 transition-all shadow-sm ${
                     isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                   }`}
                 />
@@ -779,7 +779,7 @@ export default function JobTracker() {
                     type="button"
                     onClick={load}
                     disabled={loading}
-                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-xs disabled:opacity-50 ${
+                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-sm disabled:opacity-50 ${
                       isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                     }`}
                     title="刷新"
@@ -802,7 +802,7 @@ export default function JobTracker() {
                     type="button"
                     onClick={load}
                     disabled={loading}
-                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-xs disabled:opacity-50 ${
+                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-sm disabled:opacity-50 ${
                       isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                     }`}
                     title="刷新"
@@ -822,7 +822,7 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setView((prev) => prev === 'table' ? 'kanban' : 'table')}
-                      className={`rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                      className={`rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                         isLight
                           ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
                           : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
@@ -871,7 +871,7 @@ export default function JobTracker() {
                         setFocusFilter(item.key)
                         setShowSecondaryFilters(false)
                       }}
-                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                         focusFilter === item.key
                           ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
@@ -886,7 +886,7 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setShowSecondaryFilters((prev) => !prev)}
-                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                         selectedSecondaryFilter
                           ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
@@ -913,7 +913,7 @@ export default function JobTracker() {
                           setFocusFilter(item.key)
                           setShowSecondaryFilters(false)
                         }}
-                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                           focusFilter === item.key
                             ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                             : isLight
@@ -938,7 +938,7 @@ export default function JobTracker() {
                         setFocusFilter(item.key)
                         setShowSecondaryFilters(false)
                       }}
-                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                         focusFilter === item.key
                           ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
@@ -953,7 +953,7 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setShowSecondaryFilters((prev) => !prev)}
-                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                         selectedSecondaryFilter
                           ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
@@ -980,7 +980,7 @@ export default function JobTracker() {
                           setFocusFilter(item.key)
                           setShowSecondaryFilters(false)
                         }}
-                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
+                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm ${
                           focusFilter === item.key
                             ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                             : isLight
@@ -1359,7 +1359,7 @@ function QuickCreatePanel({
   onCancel: () => void
   onSubmit: () => void
 }) {
-  const inputClass = `rounded-xl border px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue/40 focus:ring-2 focus:ring-accent-blue/20 transition-all shadow-xs ${
+  const inputClass = `rounded-xl border px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue/40 focus:ring-2 focus:ring-accent-blue/20 transition-all shadow-sm ${
     isLight ? 'border-bg-hover bg-white hover:border-gray-300' : 'border-white/[0.08] bg-black/25 hover:border-white/15'
   }`
 
@@ -1377,7 +1377,7 @@ function QuickCreatePanel({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl border border-bg-hover px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 active:scale-95 hover:text-text-primary hover:border-gray-300 shadow-xs"
+            className="rounded-xl border border-bg-hover px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 active:scale-95 hover:text-text-primary hover:border-gray-300 shadow-sm"
           >
             取消
           </button>
