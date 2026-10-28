@@ -36,14 +36,14 @@ export default function OfferCompareModal({ open, items, onClose }: Props) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm">
-      <div className="w-full max-w-[min(96vw,1200px)] max-h-[90vh] flex flex-col rounded-2xl border border-bg-hover bg-bg-secondary shadow-2xl">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <div className="w-full max-w-[min(96vw,1200px)] max-h-[90vh] flex flex-col rounded-2xl border border-bg-hover bg-bg-secondary/95 shadow-2xl backdrop-blur-xl animate-modal-pop-in">
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-hover flex-shrink-0">
           <h2 className="text-sm font-bold text-text-primary">Offer 对比</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-bg-tertiary text-text-muted"
+            className="p-2 rounded-xl hover:bg-bg-tertiary text-text-muted transition-all duration-150 active:scale-90"
             aria-label="关闭"
           >
             <X className="w-4 h-4" />

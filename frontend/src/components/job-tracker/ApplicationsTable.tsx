@@ -1348,7 +1348,7 @@ export default function ApplicationsTable({
                             <button
                               type="button"
                               onClick={() => setDeleteConfirmTarget(current)}
-                              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-red-500/20 px-3 py-2 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10"
+                              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-500/25 px-3 py-2 text-xs font-semibold text-red-500 dark:text-red-400 transition-all duration-150 active:scale-95 hover:bg-red-500/10 shadow-xs"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               删除这条记录

@@ -185,7 +185,7 @@ export function AudioDevicePicker({
             disabled={action.disabled || action.loading}
             aria-label={action.ariaLabel}
             title={action.title}
-            className="inline-flex w-9 flex-shrink-0 items-center justify-center border-l border-bg-hover/70 text-text-secondary hover:bg-bg-hover hover:text-accent-blue disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-bg-hover"
+            className="inline-flex w-9 flex-shrink-0 items-center justify-center border-l border-bg-hover/70 text-text-secondary hover:bg-bg-hover hover:text-accent-blue disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-bg-hover transition-all duration-150 active:scale-95"
           >
             {action.loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : action.icon}
           </button>
@@ -196,7 +196,7 @@ export function AudioDevicePicker({
         <div
           role="dialog"
           aria-label="音频输入设备列表"
-          className="absolute left-0 bottom-full mb-2 z-50 w-[min(360px,calc(100vw-1.5rem))] rounded-xl border border-bg-hover bg-bg-primary shadow-2xl shadow-black/20 p-2"
+          className="animate-popover-in absolute left-0 bottom-full mb-2 z-50 w-[min(360px,calc(100vw-1.5rem))] rounded-2xl border border-bg-hover/60 bg-bg-primary/95 backdrop-blur-xl shadow-2xl shadow-black/30 p-2"
         >
           <div className="flex items-center gap-2 px-1 pb-2 border-b border-bg-hover/60">
             <div className="min-w-0 flex-1">
@@ -211,7 +211,7 @@ export function AudioDevicePicker({
               disabled={refreshing}
               aria-label="刷新设备列表"
               title="刷新设备列表"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-bg-tertiary hover:bg-bg-hover text-text-secondary disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-bg-tertiary hover:bg-bg-hover text-text-secondary disabled:opacity-50 transition-all duration-150 active:scale-95"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             </button>

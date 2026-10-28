@@ -197,8 +197,8 @@ export default function SettingsDrawer() {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-40" onClick={closeSettings} />
-      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="fixed right-0 top-0 bottom-0 w-full sm:w-[520px] lg:w-[560px] bg-bg-secondary z-50 shadow-2xl flex flex-col border-l border-bg-tertiary">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 animate-fade-in" onClick={closeSettings} />
+      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[520px] lg:w-[560px] bg-bg-secondary/98 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-bg-tertiary px-4 pt-4 pb-0 bg-bg-secondary/95">
           <div className="flex items-start justify-between mb-3">
@@ -214,7 +214,7 @@ export default function SettingsDrawer() {
                 </p>
               )}
             </div>
-            <button type="button" onClick={closeSettings} className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary" aria-label="关闭">
+            <button type="button" onClick={closeSettings} className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-all duration-150 active:scale-95" aria-label="关闭">
               <X className="w-5 h-5" />
             </button>
           </div>

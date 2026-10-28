@@ -89,8 +89,8 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-bg-hover bg-bg-secondary shadow-2xl">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-bg-hover bg-bg-secondary/95 shadow-2xl backdrop-blur-xl animate-modal-pop-in">
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-hover">
           <div>
             <h2 className="text-sm font-bold text-text-primary">Offer 详情</h2>
@@ -102,7 +102,7 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="p-2 rounded-lg hover:bg-bg-tertiary text-text-muted"
+            className="p-2 rounded-xl hover:bg-bg-tertiary text-text-muted transition-all duration-150 active:scale-90"
             aria-label="关闭"
           >
             <X className="w-4 h-4" />
@@ -161,14 +161,14 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-bg-hover bg-bg-tertiary/20">
           {saveError ? <p role="alert" className="min-w-0 text-xs text-accent-red">{saveError}</p> : <span />}
           <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-xs rounded-xl border border-bg-hover hover:bg-bg-tertiary disabled:opacity-50">
+            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-xs rounded-xl border border-bg-hover hover:bg-bg-tertiary transition-all duration-150 active:scale-95 shadow-xs disabled:opacity-50">
               取消
             </button>
             <button
               type="button"
               disabled={saving}
               onClick={submit}
-              className="px-4 py-2 text-xs rounded-xl bg-accent-blue text-white font-medium disabled:opacity-50"
+              className="px-4 py-2 text-xs rounded-xl bg-accent-blue text-white font-medium transition-all duration-150 active:scale-95 shadow-sm hover:brightness-105 disabled:opacity-50"
             >
               {saving ? '保存中…' : '保存'}
             </button>
@@ -181,12 +181,16 @@ export default function OfferEditModal({ open, application, offer, onClose, onSa
           background: rgb(var(--c-bg-tertiary));
           color: rgb(var(--c-text-primary));
           font-size: 0.75rem;
-          border-radius: 0.5rem;
+          border-radius: 0.75rem;
           padding: 0.5rem 0.75rem;
           border: 1px solid rgb(var(--c-bg-hover));
           outline: none;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .input-jt:focus { border-color: rgb(var(--c-accent-blue)); }
+        .input-jt:focus {
+          border-color: rgb(var(--c-accent-blue));
+          box-shadow: 0 0 0 2px rgba(var(--c-accent-blue), 0.2);
+        }
       `}</style>
     </div>
   )

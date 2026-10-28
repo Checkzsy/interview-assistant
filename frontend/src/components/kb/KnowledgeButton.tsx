@@ -21,7 +21,7 @@ export default function KnowledgeButton({ className = '' }: KnowledgeButtonProps
           : '知识库 — 让答案引用你的本地笔记'
       }
       aria-label="打开知识库"
-      className={`relative inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-accent-amber transition-all duration-200 border border-transparent hover:border-accent-amber/40 flex-shrink-0 ${className}`}
+      className={`relative inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-accent-amber transition-all duration-200 active:scale-95 border border-transparent hover:border-accent-amber/40 flex-shrink-0 ${className}`}
     >
       <BookOpen className="w-4 h-4" />
       {needsDocs && (

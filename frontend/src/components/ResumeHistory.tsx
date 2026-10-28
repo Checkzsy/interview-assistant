@@ -90,7 +90,7 @@ function ResumeHistoryDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="animate-fade-in fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-labelledby="resume-detail-title"
@@ -100,7 +100,7 @@ function ResumeHistoryDetailModal({
       }}
     >
       <div
-        className="bg-bg-secondary border border-bg-tertiary rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
+        className="animate-modal-pop-in bg-bg-secondary/98 backdrop-blur-xl border border-bg-tertiary/80 rounded-2xl shadow-2xl shadow-black/40 max-w-2xl w-full max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-tertiary gap-2">
@@ -109,7 +109,7 @@ function ResumeHistoryDetailModal({
           </h3>
           <button
             type="button"
-            className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary shrink-0"
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-all duration-150 active:scale-95 shrink-0"
             aria-label="关闭"
             onClick={onClose}
           >
@@ -128,7 +128,7 @@ function ResumeHistoryDetailModal({
                   type="button"
                   disabled={editing}
                   onClick={() => setEditing(true)}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/25 disabled:opacity-40"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/25 disabled:opacity-40 transition-all duration-150 active:scale-95"
                 >
                   编辑
                 </button>
@@ -140,7 +140,7 @@ function ResumeHistoryDetailModal({
                         setEditing(false)
                         setText(detail?.summary ?? '')
                       }}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-bg-hover text-text-secondary hover:bg-bg-tertiary"
+                      className="text-xs px-3 py-1.5 rounded-lg border border-bg-hover text-text-secondary hover:bg-bg-tertiary transition-all duration-150 active:scale-95"
                     >
                       取消
                     </button>
@@ -148,7 +148,7 @@ function ResumeHistoryDetailModal({
                       type="button"
                       disabled={saving}
                       onClick={() => void handleSave()}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-accent-green/20 text-accent-green hover:bg-accent-green/30 disabled:opacity-50"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-accent-green/20 text-accent-green hover:bg-accent-green/30 disabled:opacity-50 transition-all duration-150 active:scale-95"
                     >
                       {saving ? '保存中…' : '保存'}
                     </button>

@@ -41,6 +41,7 @@ describe('KanbanBoard', () => {
         ]}
         onStageChange={vi.fn()}
         onReorderInStage={vi.fn()}
+        onDelete={vi.fn()}
         search=""
         showTerminalStages={false}
         onShowTerminalStagesChange={vi.fn()}
@@ -82,6 +83,7 @@ describe('KanbanBoard', () => {
         ]}
         onStageChange={vi.fn()}
         onReorderInStage={vi.fn()}
+        onDelete={vi.fn()}
         search=""
         showTerminalStages={false}
         onShowTerminalStagesChange={vi.fn()}
@@ -90,5 +92,51 @@ describe('KanbanBoard', () => {
     )
 
     expect(screen.getByText('复盘 短样本')).toBeInTheDocument()
+  })
+
+  it('deletes a card only after the confirmation dialog is accepted', () => {
+    const onDelete = vi.fn()
+    render(
+      <KanbanBoard
+        applications={[app(1, 'applied'), app(2, 'withdrawn')]}
+        onStageChange={vi.fn()}
+        onReorderInStage={vi.fn()}
+        onDelete={onDelete}
+        search=""
+        showTerminalStages
+        onShowTerminalStagesChange={vi.fn()}
+        terminalApplicationsCount={1}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 Company 2' }))
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(screen.getByText('删除这条投递记录？')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(onDelete).toHaveBeenCalledTimes(1)
+    expect(onDelete).toHaveBeenCalledWith(2)
+  })
+
+  it('keeps the card when the confirmation dialog is cancelled', () => {
+    const onDelete = vi.fn()
+    render(
+      <KanbanBoard
+        applications={[app(1, 'applied')]}
+        onStageChange={vi.fn()}
+        onReorderInStage={vi.fn()}
+        onDelete={onDelete}
+        search=""
+        showTerminalStages={false}
+        onShowTerminalStagesChange={vi.fn()}
+        terminalApplicationsCount={0}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 Company 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(screen.queryByText('删除这条投递记录？')).not.toBeInTheDocument()
   })
 })

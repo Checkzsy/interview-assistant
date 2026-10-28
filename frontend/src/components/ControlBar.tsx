@@ -773,19 +773,19 @@ export default function ControlBar() {
           <>
             {isPaused ? (
               <button onClick={handleResume} disabled={loading}
-                className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 btn-primary text-xs font-semibold disabled:opacity-50 flex-shrink-0" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-green)), rgb(var(--c-accent-green) / 0.85))' }}>
+                className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 btn-primary text-xs font-semibold disabled:opacity-50 flex-shrink-0 active:scale-[0.97]" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-green)), rgb(var(--c-accent-green) / 0.85))' }}>
                 <PlayCircle className="w-3.5 h-3.5" />
                 <span>继续</span>
               </button>
             ) : (
               <button onClick={handlePause} disabled={loading}
-                className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 text-white text-xs font-semibold transition-all duration-150 disabled:opacity-50 flex-shrink-0" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-amber)), rgb(var(--c-accent-amber) / 0.85))' }}>
+                className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 text-white text-xs font-semibold transition-all duration-150 disabled:opacity-50 flex-shrink-0 active:scale-[0.97]" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-amber)), rgb(var(--c-accent-amber) / 0.85))' }}>
                 <Pause className="w-3.5 h-3.5" />
                 <span>暂停</span>
               </button>
             )}
             <button onClick={handleStop} disabled={loading}
-              className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 btn-danger text-xs font-semibold disabled:opacity-50 flex-shrink-0">
+              className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-3.5 py-2 btn-danger text-xs font-semibold disabled:opacity-50 flex-shrink-0 active:scale-[0.97]">
               <Square className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{isExamMode ? '结束' : '结束面试'}</span>
             </button>
@@ -798,13 +798,13 @@ export default function ControlBar() {
           </button>
         ) : !isExamMode && !sttLoaded ? (
           <button onClick={handleStart} disabled={loading || selectedDevice === null}
-            className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-4 py-2 text-white text-xs font-semibold flex-shrink-0" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-amber)), rgb(var(--c-accent-amber) / 0.85))' }}>
+            className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-4 py-2 text-white text-xs font-semibold flex-shrink-0 active:scale-[0.97]" style={{ background: 'linear-gradient(135deg, rgb(var(--c-accent-amber)), rgb(var(--c-accent-amber) / 0.85))' }}>
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>语音未就绪，开始面试</span>
           </button>
         ) : (
           <button onClick={handleStart} disabled={loading || (!isExamMode && selectedDevice === null)}
-            className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-4 py-2 btn-primary text-xs font-semibold disabled:opacity-50 flex-shrink-0">
+            className="flex min-h-[38px] items-center gap-1.5 rounded-lg px-4 py-2 btn-primary text-xs font-semibold disabled:opacity-50 flex-shrink-0 active:scale-[0.97]">
             <Play className="w-3.5 h-3.5" />
             <span>{isExamMode ? '开始笔试' : '开始面试'}</span>
           </button>
@@ -814,7 +814,7 @@ export default function ControlBar() {
 
         {streamingIds.length > 0 && (
           <button onClick={handleCancelAsk} disabled={cancellingAsk}
-            className="flex items-center gap-1 min-h-[36px] min-w-[36px] justify-center px-2 py-2 bg-accent-amber/20 hover:bg-accent-amber/30 text-accent-amber text-xs rounded-lg transition-colors flex-shrink-0 disabled:opacity-50"
+            className="flex items-center gap-1 min-h-[36px] min-w-[36px] justify-center px-2 py-2 bg-accent-amber/20 hover:bg-accent-amber/30 text-accent-amber text-xs rounded-lg transition-all duration-150 active:scale-95 flex-shrink-0 disabled:opacity-50"
             aria-label={cancellingAsk ? '正在取消生成' : '取消正在生成的回答'}
             title="取消全部正在生成的回答">
             {cancellingAsk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
@@ -828,7 +828,7 @@ export default function ControlBar() {
           disabled={clearing}
           title={qaPairs.length > 30 ? `当前会话较长 (${qaPairs.length} 条), 建议清空以保持流畅` : isExamMode ? '清空当前页的 AI 答案 (不影响历史)' : '清空当前页的实时转录与 AI 答案 (不影响历史)'}
           aria-label={qaPairs.length > 30 ? `清空当前 ${qaPairs.length} 条转录与答案` : '清空当前转录与答案'}
-          className={`relative flex items-center gap-1 min-h-[36px] min-w-[36px] justify-center px-2 py-2 text-xs rounded-lg transition-colors flex-shrink-0 disabled:opacity-50 ${
+          className={`relative flex items-center gap-1 min-h-[36px] min-w-[36px] justify-center px-2 py-2 text-xs rounded-lg transition-all duration-150 active:scale-95 flex-shrink-0 disabled:opacity-50 ${
             qaPairs.length > 30
               ? 'bg-accent-amber/20 hover:bg-accent-amber/30 text-accent-amber'
               : 'bg-bg-tertiary hover:bg-bg-hover hover:text-accent-red text-text-secondary'
@@ -862,7 +862,7 @@ export default function ControlBar() {
             onCompositionEnd={() => { setTimeout(() => { isComposingRef.current = false }, 0) }}
             onPaste={handlePaste}
             placeholder={pastedImage ? "可添加文字说明（可选），Enter 发送" : "输入问题，Enter 发送…"}
-            className="w-full bg-bg-tertiary/60 text-text-primary text-xs rounded-xl px-3.5 py-2.5 border border-bg-hover/50 focus:outline-none focus:border-accent-blue/50 focus:ring-1 focus:ring-accent-blue/20 placeholder:text-text-muted/60 pr-8 transition-all duration-200" />
+            className="w-full bg-bg-tertiary/60 text-text-primary text-xs rounded-xl px-3.5 py-2.5 border border-bg-hover/50 focus:outline-none focus:border-accent-blue/60 focus:ring-2 focus:ring-accent-blue/20 placeholder:text-text-muted/60 pr-8 transition-all duration-200" />
           {pastedImage && (
             <ImageIcon className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-accent-green" />
           )}
@@ -884,19 +884,19 @@ export default function ControlBar() {
               : '请先输入问题或粘贴截图'
           }
           aria-label="发送问题"
-          className="px-3 py-2.5 btn-primary text-xs rounded-xl disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+          className="px-3 py-2.5 btn-primary text-xs rounded-xl disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 active:scale-95 transition-all duration-150"
         >
           {asking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
         </button>
       </div>
 
       {inputMeterOpen && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 px-3 py-4 sm:items-center">
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 backdrop-blur-sm px-3 py-4 sm:items-center animate-fade-in">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="麦克风输入测试"
-            className="w-full max-w-sm rounded-xl border border-bg-hover bg-bg-primary p-4 shadow-2xl shadow-black/30"
+            className="w-full max-w-sm rounded-2xl border border-bg-hover/70 bg-bg-primary/95 backdrop-blur-xl p-4 shadow-2xl shadow-black/40 animate-modal-pop-in"
           >
             <div className="flex items-start gap-3">
               <div className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-accent-green/15 text-accent-green">

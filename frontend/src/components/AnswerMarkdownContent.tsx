@@ -137,7 +137,7 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={handleCopy}
       disabled={isCopying}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-bg-hover text-text-muted hover:text-text-primary transition-colors text-[11px] disabled:cursor-wait disabled:opacity-70"
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-bg-hover text-text-muted hover:text-text-primary transition-all duration-150 active:scale-95 text-[11px] disabled:cursor-wait disabled:opacity-70"
       title={copyState === 'failed' ? '复制失败，请检查浏览器权限' : '复制代码'}
       aria-label={label}
     >

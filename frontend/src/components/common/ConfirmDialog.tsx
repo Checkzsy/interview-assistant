@@ -72,7 +72,7 @@ export default function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in"
       onClick={() => {
         if (!busy) onCancel()
       }}
@@ -82,7 +82,7 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby={description ? 'confirm-dialog-desc' : undefined}
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-bg-hover bg-bg-secondary shadow-2xl"
+        className="animate-modal-pop-in w-full max-w-md overflow-hidden rounded-2xl border border-bg-hover/80 bg-bg-secondary/95 shadow-2xl shadow-black/40 backdrop-blur-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start gap-3 border-b border-bg-hover px-5 py-4">
@@ -109,7 +109,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-xl border border-bg-hover px-4 py-2 text-xs hover:bg-bg-tertiary disabled:opacity-50"
+            className="rounded-xl border border-bg-hover px-4 py-2 text-xs hover:bg-bg-tertiary disabled:opacity-50 transition-all duration-150 active:scale-[0.97]"
           >
             {cancelLabel}
           </button>
@@ -117,7 +117,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-medium disabled:opacity-50 ${confirmClass}`}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-medium disabled:opacity-50 transition-all duration-150 active:scale-[0.97] shadow-sm ${confirmClass}`}
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             {busy ? '处理中…' : confirmLabel}

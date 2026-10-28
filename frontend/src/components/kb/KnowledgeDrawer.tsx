@@ -84,13 +84,13 @@ export default function KnowledgeDrawer() {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setOpen(false)} />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 animate-fade-in" onClick={() => setOpen(false)} />
       <div
         ref={drawerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="kb-drawer-title"
-        className="fixed right-0 top-0 bottom-0 w-full sm:w-[480px] bg-bg-secondary z-50 shadow-2xl flex flex-col border-l border-bg-tertiary"
+        className="animate-drawer-slide-in fixed right-0 top-0 bottom-0 w-full sm:w-[480px] bg-bg-secondary/98 backdrop-blur-xl z-50 shadow-2xl shadow-black/40 flex flex-col border-l border-bg-tertiary/80"
       >
         <div className="flex-shrink-0 border-b border-bg-tertiary px-3 pt-3 pb-0">
           <div className="flex items-center justify-between mb-3 px-1">
@@ -105,14 +105,14 @@ export default function KnowledgeDrawer() {
                 disabled={refreshing}
                 title="刷新"
                 aria-label="刷新"
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary disabled:opacity-50"
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary disabled:opacity-50 transition-all duration-150 active:scale-95"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-all duration-150 active:scale-95"
                 aria-label="关闭"
               >
                 <X className="w-5 h-5" />

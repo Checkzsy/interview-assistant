@@ -735,8 +735,8 @@ export default function JobTracker() {
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-bg-hover bg-bg-secondary text-accent-blue">
-                <Briefcase className="h-4.5 w-4.5" strokeWidth={2} />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-bg-hover bg-bg-secondary text-accent-blue shadow-xs">
+                <Briefcase className="h-5 w-5" strokeWidth={2} />
               </div>
               <div className="space-y-0.5">
                 <h2 className="text-base font-bold tracking-tight text-text-primary">求职进度</h2>
@@ -757,7 +757,7 @@ export default function JobTracker() {
                       setSearch('')
                     }
                   }}
-                  className={`w-full rounded-lg border py-2 pl-9 ${search ? 'pr-9' : 'pr-3'} text-sm text-text-primary placeholder:text-text-muted/70 focus:border-accent-blue/40 focus:outline-none focus:ring-2 focus:ring-accent-blue/15 ${
+                  className={`w-full rounded-xl border py-2 pl-9 ${search ? 'pr-9' : 'pr-3'} text-sm text-text-primary placeholder:text-text-muted/70 focus:border-accent-blue/40 focus:outline-none focus:ring-2 focus:ring-accent-blue/15 transition-all shadow-xs ${
                     isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                   }`}
                 />
@@ -765,7 +765,7 @@ export default function JobTracker() {
                   <button
                     type="button"
                     onClick={() => setSearch('')}
-                    className="absolute right-2 top-1/2 rounded-md p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+                    className="absolute right-2 top-1/2 rounded-lg p-1 text-text-muted transition-all active:scale-90 hover:bg-bg-hover hover:text-text-primary"
                     aria-label="清空搜索"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -779,7 +779,7 @@ export default function JobTracker() {
                     type="button"
                     onClick={load}
                     disabled={loading}
-                    className={`rounded-lg border p-2 text-text-muted transition-colors hover:border-accent-blue/25 hover:text-accent-blue disabled:opacity-50 ${
+                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-xs disabled:opacity-50 ${
                       isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                     }`}
                     title="刷新"
@@ -790,7 +790,7 @@ export default function JobTracker() {
                   <button
                     type="button"
                     onClick={() => setComposerOpen((prev) => !prev)}
-                    className="flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                    className="flex items-center gap-1.5 rounded-xl bg-accent-blue px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95 shadow-sm hover:brightness-105"
                   >
                     <Plus className="h-4 w-4" strokeWidth={2.2} />
                     {composerOpen ? '收起新增' : '新增记录'}
@@ -802,7 +802,7 @@ export default function JobTracker() {
                     type="button"
                     onClick={load}
                     disabled={loading}
-                    className={`rounded-lg border p-2 text-text-muted transition-colors hover:border-accent-blue/25 hover:text-accent-blue disabled:opacity-50 ${
+                    className={`rounded-xl border p-2 text-text-muted transition-all duration-150 active:scale-90 hover:border-accent-blue/25 hover:text-accent-blue shadow-xs disabled:opacity-50 ${
                       isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
                     }`}
                     title="刷新"
@@ -813,7 +813,7 @@ export default function JobTracker() {
                   <button
                     type="button"
                     onClick={() => setComposerOpen((prev) => !prev)}
-                    className="flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                    className="flex items-center gap-1.5 rounded-xl bg-accent-blue px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95 shadow-sm hover:brightness-105"
                   >
                     <Plus className="h-4 w-4" strokeWidth={2.2} />
                     {composerOpen ? '收起新增' : '新增记录'}
@@ -822,10 +822,10 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setView((prev) => prev === 'table' ? 'kanban' : 'table')}
-                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      className={`rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                         isLight
-                          ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary'
-                          : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
+                          ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
+                          : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
                       }`}
                     >
                       {view === 'table' ? '整理模式' : '返回表格'}
@@ -871,12 +871,12 @@ export default function JobTracker() {
                         setFocusFilter(item.key)
                         setShowSecondaryFilters(false)
                       }}
-                      className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                         focusFilter === item.key
-                          ? 'border-bg-hover bg-transparent text-accent-blue'
+                          ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
-                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary'
-                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
+                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
+                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
                       }`}
                     >
                       {item.label} · {item.count}
@@ -886,12 +886,12 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setShowSecondaryFilters((prev) => !prev)}
-                      className={`shrink-0 inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                         selectedSecondaryFilter
-                          ? 'border-bg-hover bg-transparent text-accent-blue'
+                          ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
-                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary'
-                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
+                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
+                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
                       }`}
                     >
                       <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -902,8 +902,8 @@ export default function JobTracker() {
                 </div>
 
                 {showSecondaryFilters ? (
-                  <div className={`grid gap-2 rounded-lg border p-2 ${
-                    isLight ? 'border-bg-hover bg-white/90' : 'border-white/[0.08] bg-black/12'
+                  <div className={`grid gap-2 rounded-2xl border p-2.5 shadow-xl backdrop-blur-xl animate-popover-in ${
+                    isLight ? 'border-bg-hover bg-white/95' : 'border-white/[0.08] bg-bg-secondary/90'
                   }`}>
                     {visibleSecondaryFocusFilterOptions.map((item) => (
                       <button
@@ -913,9 +913,9 @@ export default function JobTracker() {
                           setFocusFilter(item.key)
                           setShowSecondaryFilters(false)
                         }}
-                        className={`rounded-md border px-3 py-2 text-left text-xs font-medium transition-colors ${
+                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                           focusFilter === item.key
-                            ? 'border-bg-hover bg-transparent text-accent-blue'
+                            ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                             : isLight
                               ? 'border-bg-hover bg-bg-secondary text-text-secondary hover:text-text-primary'
                               : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
@@ -938,12 +938,12 @@ export default function JobTracker() {
                         setFocusFilter(item.key)
                         setShowSecondaryFilters(false)
                       }}
-                      className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                         focusFilter === item.key
-                          ? 'border-bg-hover bg-transparent text-accent-blue'
+                          ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
-                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary'
-                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
+                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
+                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
                       }`}
                     >
                       {item.label} · {item.count}
@@ -953,12 +953,12 @@ export default function JobTracker() {
                     <button
                       type="button"
                       onClick={() => setShowSecondaryFilters((prev) => !prev)}
-                      className={`shrink-0 inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      className={`shrink-0 inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                         selectedSecondaryFilter
-                          ? 'border-bg-hover bg-transparent text-accent-blue'
+                          ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                           : isLight
-                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary'
-                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
+                            ? 'border-bg-hover bg-white text-text-secondary hover:text-text-primary hover:border-gray-300'
+                            : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary hover:border-white/15'
                       }`}
                     >
                       <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -969,8 +969,8 @@ export default function JobTracker() {
                 </div>
 
                 {showSecondaryFilters && visibleSecondaryFocusFilterOptions.length > 0 ? (
-                  <div className={`flex flex-wrap gap-2 rounded-lg border p-2 ${
-                    isLight ? 'border-bg-hover bg-white/90' : 'border-white/[0.08] bg-black/12'
+                  <div className={`flex flex-wrap gap-2 rounded-2xl border p-2.5 shadow-xl backdrop-blur-xl animate-popover-in ${
+                    isLight ? 'border-bg-hover bg-white/95' : 'border-white/[0.08] bg-bg-secondary/90'
                   }`}>
                     {visibleSecondaryFocusFilterOptions.map((item) => (
                       <button
@@ -980,9 +980,9 @@ export default function JobTracker() {
                           setFocusFilter(item.key)
                           setShowSecondaryFilters(false)
                         }}
-                        className={`rounded-md border px-3 py-2 text-left text-xs font-medium transition-colors ${
+                        className={`rounded-xl border px-3 py-2 text-left text-xs font-medium transition-all duration-150 active:scale-95 shadow-xs ${
                           focusFilter === item.key
-                            ? 'border-bg-hover bg-transparent text-accent-blue'
+                            ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue font-semibold ring-1 ring-accent-blue/20'
                             : isLight
                               ? 'border-bg-hover bg-bg-secondary text-text-secondary hover:text-text-primary'
                               : 'border-white/[0.08] bg-black/10 text-text-secondary hover:text-text-primary'
@@ -1099,6 +1099,7 @@ export default function JobTracker() {
                 applications={filteredApplications}
                 onStageChange={onStageChange}
                 onReorderInStage={onReorderInStage}
+                onDelete={onDelete}
                 search={deferredSearch}
                 showTerminalStages={showTerminalStages}
                 onShowTerminalStagesChange={setShowTerminalStages}
@@ -1358,25 +1359,25 @@ function QuickCreatePanel({
   onCancel: () => void
   onSubmit: () => void
 }) {
-  const inputClass = `rounded-lg border px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent-blue/40 focus:ring-2 focus:ring-accent-blue/15 ${
-    isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/15'
+  const inputClass = `rounded-xl border px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue/40 focus:ring-2 focus:ring-accent-blue/20 transition-all shadow-xs ${
+    isLight ? 'border-bg-hover bg-white hover:border-gray-300' : 'border-white/[0.08] bg-black/25 hover:border-white/15'
   }`
 
   return (
     <section
-      className={`rounded-lg border p-3.5 ${
-        isLight ? 'border-bg-hover bg-white' : 'border-white/[0.08] bg-black/20'
+      className={`rounded-2xl border p-4 shadow-md backdrop-blur-md animate-fade-up transition-colors ${
+        isLight ? 'border-bg-hover/80 bg-white/90' : 'border-white/[0.08] bg-bg-secondary/80'
       }`}
     >
       <div className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">快速新增</div>
+          <div className="text-sm font-bold text-text-primary">快速新增</div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-bg-hover px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:text-text-primary"
+            className="rounded-xl border border-bg-hover px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 active:scale-95 hover:text-text-primary hover:border-gray-300 shadow-xs"
           >
             取消
           </button>
@@ -1384,7 +1385,7 @@ function QuickCreatePanel({
             type="button"
             disabled={creating}
             onClick={onSubmit}
-            className="rounded-md bg-accent-blue px-3.5 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+            className="rounded-xl bg-accent-blue px-3.5 py-1.5 text-xs font-semibold text-white transition-all duration-150 active:scale-95 shadow-sm hover:brightness-105 disabled:opacity-60"
           >
             {creating ? '创建中...' : '创建记录'}
           </button>
@@ -1487,9 +1488,9 @@ function ApplicationReviewsModal({
     : '--'
   const latestScoreLabel = latestScore != null ? latestScore.toFixed(1) : '未出分'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-0 sm:p-4">
-      <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-none border border-bg-hover bg-bg-secondary shadow-xl sm:h-auto sm:max-h-[82vh] sm:rounded-lg">
-        <div className="flex items-start justify-between gap-3 border-b border-bg-hover px-4 py-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 sm:p-4 backdrop-blur-md">
+      <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-none border border-bg-hover bg-bg-secondary/95 shadow-2xl backdrop-blur-xl sm:h-auto sm:max-h-[82vh] sm:rounded-2xl animate-modal-pop-in">
+        <div className="flex items-start justify-between gap-3 border-b border-bg-hover px-5 py-3.5">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-bold text-text-primary">关联复盘</h3>
@@ -1503,7 +1504,7 @@ function ApplicationReviewsModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-2 text-text-muted hover:bg-bg-hover hover:text-text-primary"
+            className="rounded-xl p-2 text-text-muted transition-all duration-150 active:scale-90 hover:bg-bg-hover hover:text-text-primary"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />

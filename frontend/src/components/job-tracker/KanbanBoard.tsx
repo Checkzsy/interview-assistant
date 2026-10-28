@@ -32,9 +32,11 @@ import {
   Inbox,
   ArrowRight,
   MessageSquareText,
+  Trash2,
 } from 'lucide-react'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 import { isLightColorScheme } from '@/lib/colorScheme'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import type { Application } from './types'
 import { filterApplicationsBySearch } from './search'
 import {
@@ -127,10 +129,10 @@ function StageSelect({
 }) {
   return (
     <select
-      className={`mt-2 w-full max-w-full rounded-lg border px-2 py-1.5 text-[11px] font-medium outline-none transition-colors ${
+      className={`mt-2 w-full max-w-full rounded-xl border px-2.5 py-1.5 text-[11px] font-medium outline-none transition-all duration-200 cursor-pointer ${
         isLight
-          ? 'border-gray-200 bg-white text-gray-800 focus:border-blue-400 focus:ring-1 focus:ring-blue-200'
-          : 'border-white/[0.1] bg-black/20 text-text-primary focus:border-accent-blue/40 focus:ring-1 focus:ring-accent-blue/25'
+          ? 'border-gray-200/90 bg-white text-gray-800 hover:border-gray-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 shadow-sm'
+          : 'border-white/[0.08] bg-black/25 text-text-primary hover:border-white/20 focus:border-accent-blue/50 focus:ring-2 focus:ring-accent-blue/20 shadow-sm'
       }`}
       value={value}
       disabled={disabled}
@@ -161,6 +163,7 @@ function SortableKanbanCard({
   sortDisabled,
   busy,
   onStageChange,
+  onRequestDelete,
   index,
 }: {
   app: Application
@@ -168,6 +171,7 @@ function SortableKanbanCard({
   sortDisabled: boolean
   busy: boolean
   onStageChange: (id: number, stage: string) => void
+  onRequestDelete: (app: Application) => void
   index: number
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -215,14 +219,14 @@ function SortableKanbanCard({
       ref={setNodeRef}
       style={style}
       className={`
-        kanban-card rounded-lg border pl-2 pr-3 py-2.5 border-l-[3px] group/card
+        kanban-card rounded-xl border pl-2.5 pr-3 py-2.5 border-l-[3.5px] group/card shadow-sm hover:shadow-md transition-all duration-200
         ${leftBorder}
         ${isLight
-          ? 'border-gray-200/80 bg-white'
-          : 'border-white/[0.07] bg-bg-secondary/90'
+          ? 'border-gray-200/80 bg-white hover:border-gray-300/90'
+          : 'border-white/[0.08] bg-bg-secondary/90 hover:border-white/15'
         }
         ${busy ? 'opacity-50 pointer-events-none' : ''}
-        ${isDragging ? 'opacity-40 ring-2 ring-accent-blue/30 scale-[1.02]' : ''}
+        ${isDragging ? 'opacity-40 ring-2 ring-accent-blue/40 scale-[1.02] shadow-xl' : ''}
       `}
     >
       <div className="flex gap-2">
@@ -230,9 +234,9 @@ function SortableKanbanCard({
           type="button"
           className={`
             mt-0.5 flex h-8 w-7 shrink-0 items-center justify-center self-start rounded-lg
-            touch-none cursor-grab active:cursor-grabbing outline-none transition-colors
+            touch-none cursor-grab active:cursor-grabbing outline-none transition-all duration-150 active:scale-90
             ${sortDisabled || busy ? 'cursor-not-allowed opacity-30' : ''}
-            ${isLight ? 'text-gray-400 hover:bg-gray-100' : 'text-text-muted/60 hover:bg-white/[0.06]'}
+            ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted/60 hover:bg-white/[0.06] hover:text-text-primary'}
           `}
           aria-label="\u62D6\u52A8\u6392\u5E8F"
           disabled={sortDisabled || busy}
@@ -244,7 +248,7 @@ function SortableKanbanCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
             <span
-              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${theme.iconBg} ${theme.iconText}`}
+              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${theme.iconBg} ${theme.iconText}`}
             >
               <Building2 className="w-4 h-4" strokeWidth={2} />
             </span>
@@ -306,16 +310,30 @@ function SortableKanbanCard({
                 type="button"
                 title={`\u79FB\u81F3 ${STAGE_LABELS[nextStage]}`}
                 onClick={() => onStageChange(app.id, nextStage)}
-                className={`mt-2 inline-flex h-[30px] shrink-0 items-center justify-center gap-1 rounded-lg border px-2 transition-all ${
+                className={`mt-2 inline-flex h-[30px] shrink-0 items-center justify-center gap-1 rounded-xl border px-2.5 transition-all duration-150 active:scale-95 shadow-sm ${
                   isLight
-                    ? 'border-gray-200 bg-gray-50 text-gray-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'
-                    : 'border-white/10 bg-white/[0.04] text-text-muted hover:bg-accent-blue/15 hover:text-accent-blue hover:border-accent-blue/30'
+                    ? 'border-blue-200/80 bg-blue-50/80 text-blue-600 hover:bg-blue-100 hover:border-blue-300'
+                    : 'border-accent-blue/30 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 hover:border-accent-blue/40'
                 }`}
               >
                 <ArrowRight className="w-3.5 h-3.5" />
                 <span className="text-[10px] font-medium">推进</span>
               </button>
             )}
+            <button
+              type="button"
+              title={`删除 ${app.company}`}
+              aria-label={`删除 ${app.company}`}
+              disabled={busy}
+              onClick={() => onRequestDelete(app)}
+              className={`mt-2 inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-xl border transition-all duration-150 active:scale-90 shadow-sm disabled:opacity-40 ${
+                isLight
+                  ? 'border-gray-200/80 bg-gray-50/80 text-gray-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600'
+                  : 'border-white/10 bg-white/[0.04] text-text-muted hover:border-accent-red/30 hover:bg-accent-red/15 hover:text-accent-red'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
@@ -331,6 +349,7 @@ function KanbanColumn({
   sortDisabled,
   busyId,
   onStageChange,
+  onRequestDelete,
 }: {
   stage: string
   appMap: Map<number, Application>
@@ -339,6 +358,7 @@ function KanbanColumn({
   sortDisabled: boolean
   busyId: number | null
   onStageChange: (id: number, stage: string) => void
+  onRequestDelete: (app: Application) => void
 }) {
   const Icon = STAGE_HEADER_ICON[stage] ?? LayoutGrid
   const theme = getStageTheme(stage, isLight)
@@ -351,42 +371,40 @@ function KanbanColumn({
     <div
       data-kanban-stage={stage}
       className={`
-        flex w-[min(100vw-2rem,280px)] shrink-0 snap-start flex-col rounded-lg border overflow-hidden
+        flex w-[min(100vw-2rem,280px)] shrink-0 snap-start flex-col rounded-2xl border overflow-hidden shadow-sm
         min-h-[min(480px,60vh)] max-h-[calc(100vh-200px)]
         ${isLight
-          ? 'border-gray-200 bg-gray-50/80'
-          : 'border-white/[0.08] bg-bg-secondary/40'
+          ? 'border-gray-200/90 bg-gray-50/70'
+          : 'border-white/[0.08] bg-bg-secondary/40 backdrop-blur-sm'
         }
       `}
     >
       {/* Stage color bar */}
-      <div className={`h-1 w-full shrink-0 ${theme.dotColor}`} />
+      <div className={`h-1.5 w-full shrink-0 ${theme.dotColor}`} />
 
       {/* Column header */}
       <div
-        className={`flex items-center gap-2.5 border-b px-3 py-2.5 shrink-0 ${
-          isLight ? 'border-gray-200 bg-white/60' : 'border-white/[0.06] bg-black/10'
+        className={`flex items-center gap-2.5 border-b px-3.5 py-2.5 shrink-0 backdrop-blur-md ${
+          isLight ? 'border-gray-200/80 bg-white/70' : 'border-white/[0.06] bg-black/15'
         }`}
       >
         <div
-          className={`flex h-8 w-8 items-center justify-center rounded-md ${theme.iconBg}`}
+          className={`flex h-8 w-8 items-center justify-center rounded-xl transition-transform ${theme.iconBg}`}
         >
           <Icon className={`w-[18px] h-[18px] ${theme.iconText}`} strokeWidth={2} />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className={`truncate text-xs font-bold ${isLight ? 'text-gray-800' : 'text-text-primary'}`}>
+          <h3 className={`truncate text-xs font-bold tracking-tight ${isLight ? 'text-gray-800' : 'text-text-primary'}`}>
             <span>{STAGE_LABELS[stage] ?? stage}</span>
           </h3>
           <p className={`text-[10px] mt-0.5 ${isLight ? 'text-gray-400' : 'text-text-muted'}`}>
-            {list.length}{' \u6761\u8BB0\u5F55'}
+            {list.length} \u6761\u8BB0\u5F55
           </p>
         </div>
         <span
-          className={`flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+          className={`flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[10px] font-bold shadow-xs ${
             list.length > 0
-              ? isLight
-                ? `${theme.iconBg} ${theme.iconText}`
-                : `${theme.iconBg} ${theme.iconText}`
+              ? `${theme.iconBg} ${theme.iconText}`
               : isLight
                 ? 'bg-gray-200 text-gray-400'
                 : 'bg-white/[0.06] text-text-muted/50'
@@ -407,6 +425,7 @@ function KanbanColumn({
               sortDisabled={sortDisabled}
               busy={busyId === app.id}
               onStageChange={onStageChange}
+              onRequestDelete={onRequestDelete}
               index={i}
             />
           ))}
@@ -430,9 +449,9 @@ function CardPreview({ app, isLight }: { app: Application; isLight: boolean }) {
   return (
     <div
       className={`
-        w-[260px] cursor-grabbing rounded-lg border border-l-[3px] px-3 py-2.5 shadow-lg
+        w-[260px] cursor-grabbing rounded-xl border border-l-[3.5px] px-3.5 py-2.5 shadow-2xl
         ${leftBorder}
-        ${isLight ? 'border-gray-200 bg-white' : 'border-white/20 bg-[#1e1e2a]'}
+        ${isLight ? 'border-gray-200/90 bg-white' : 'border-white/20 bg-bg-secondary/95'}
       `}
     >
       <div className="flex items-center gap-2">
@@ -450,6 +469,7 @@ type Props = {
   applications: Application[]
   onStageChange: (appId: number, stage: string) => void | Promise<void>
   onReorderInStage: (stage: string, orderedIds: number[]) => void | Promise<void>
+  onDelete: (appId: number) => void | Promise<void>
   search: string
   showTerminalStages: boolean
   onShowTerminalStagesChange: (show: boolean) => void
@@ -460,6 +480,7 @@ export default function KanbanBoard({
   applications,
   onStageChange,
   onReorderInStage,
+  onDelete,
   search,
   showTerminalStages,
   onShowTerminalStagesChange,
@@ -471,6 +492,7 @@ export default function KanbanBoard({
   const [activeId, setActiveId] = useState<number | null>(null)
   const movingRef = useRef<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Application | null>(null)
 
   const visibleStages = useMemo(
     () => (showTerminalStages ? [...STAGE_COLUMN_ORDER] : [...ONGOING_STAGES]),
@@ -511,6 +533,12 @@ export default function KanbanBoard({
     },
     [applications, onStageChange],
   )
+
+  const confirmDelete = useCallback(() => {
+    const target = deleteTarget
+    setDeleteTarget(null)
+    if (target) void Promise.resolve(onDelete(target.id))
+  }, [deleteTarget, onDelete])
 
   const handleDragStart = (e: DragStartEvent) => {
     setActiveId(Number(e.active.id))
@@ -574,10 +602,32 @@ export default function KanbanBoard({
 
   return (
     <div
-      className={`flex h-full min-h-0 gap-3 rounded-lg border p-3 md:p-4 ${
-        isLight ? 'border-gray-200 bg-white/60' : 'border-white/[0.07] bg-bg-primary/40'
+      className={`flex h-full min-h-0 gap-3.5 rounded-2xl border p-3.5 md:p-4.5 shadow-sm transition-colors ${
+        isLight ? 'border-gray-200/90 bg-white/70 backdrop-blur-md' : 'border-white/[0.07] bg-bg-primary/50 backdrop-blur-md'
       }`}
     >
+      <ConfirmDialog
+        open={deleteTarget != null}
+        tone="danger"
+        title="删除这条投递记录？"
+        description="与该岗位关联的复盘、待办和 Offer 数据也会一并移除。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+      >
+        {deleteTarget ? (
+          <div className="rounded-lg border border-bg-hover bg-bg-tertiary/20 px-3 py-2">
+            <div className="text-sm font-semibold text-text-primary">
+              {deleteTarget.company || '未命名公司'}
+            </div>
+            <div className="mt-0.5 text-xs text-text-muted">
+              {deleteTarget.position || '岗位未填写'}
+            </div>
+          </div>
+        ) : null}
+      </ConfirmDialog>
+
       {/* Left stage rail (desktop) */}
       <nav
         className={`hidden w-14 shrink-0 flex-col gap-1 md:flex ${
@@ -596,7 +646,7 @@ export default function KanbanBoard({
               title={`${STAGE_LABELS[st] ?? st}\uFF08${n}\uFF09`}
               onClick={() => scrollToStage(st)}
               className={`
-                relative flex flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-bold transition-all
+                relative flex flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-bold transition-all duration-150 active:scale-90 hover:scale-[1.04]
                 ${isLight
                   ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
                   : 'text-text-muted/70 hover:bg-white/[0.06] hover:text-text-primary'
@@ -621,7 +671,7 @@ export default function KanbanBoard({
         <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div
-              className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+              className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-xs ${
                 isLight ? 'bg-blue-500/10 text-blue-600' : 'bg-violet-500/20 text-violet-200'
               }`}
             >
@@ -629,10 +679,10 @@ export default function KanbanBoard({
             </div>
             <div>
               <h2 className={`text-sm font-bold tracking-tight ${isLight ? 'text-gray-800' : 'text-text-primary'}`}>
-                {'\u6C42\u804C\u7BA1\u9053'}
+                \u6C42\u804C\u7BA1\u9053
               </h2>
               <p className={`text-[10px] mt-0.5 ${isLight ? 'text-gray-400' : 'text-text-muted'}`}>
-                {totalApps}{' \u6761 \u00B7 '}{sortDisabled ? '\u641C\u7D22\u4E2D' : '\u53EF\u6392\u5E8F'}
+                {totalApps} \u6761 \u00B7 {sortDisabled ? '\u641C\u7D22\u4E2D' : '\u53EF\u6392\u5E8F'}
               </p>
             </div>
           </div>
@@ -641,17 +691,17 @@ export default function KanbanBoard({
               <button
                 type="button"
                 onClick={() => onShowTerminalStagesChange(true)}
-                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-colors ${
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-all duration-150 active:scale-95 shadow-xs ${
                   isLight
                     ? 'bg-red-50 text-red-600 ring-red-200 hover:bg-red-100'
                     : 'bg-red-500/15 text-red-200 ring-red-400/25 hover:bg-red-500/25'
                 }`}
               >
-                {terminalApplicationsCount}{' \u6761\u5728\u5DF2\u7ED3\u675F \u00B7 \u5C55\u5F00'}
+                {terminalApplicationsCount} \u6761\u5728\u5DF2\u7ED3\u675F \u00B7 \u5C55\u5F00
               </button>
             ) : null}
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+              className={`flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150 active:scale-98 ${
                 isLight
                   ? 'border-gray-200 bg-white hover:bg-gray-50'
                   : 'border-white/[0.08] bg-black/20 hover:bg-white/[0.04]'
@@ -659,17 +709,17 @@ export default function KanbanBoard({
             >
               <input
                 type="checkbox"
-                className="rounded border-bg-hover text-accent-blue"
+                className="rounded border-bg-hover text-accent-blue focus:ring-accent-blue/30"
                 checked={showTerminalStages}
                 onChange={(e) => onShowTerminalStagesChange(e.target.checked)}
               />
-              {'\u663E\u793A\u5DF2\u7ED3\u675F'}
+              \u663E\u793A\u5DF2\u7ED3\u675F
             </label>
-            <div className={`flex rounded-lg border p-0.5 ${isLight ? 'border-gray-200' : 'border-bg-hover'}`}>
+            <div className={`flex rounded-xl border p-0.5 shadow-xs ${isLight ? 'border-gray-200 bg-white/70' : 'border-bg-hover bg-bg-secondary/40'}`}>
               <button
                 type="button"
                 aria-label="\u5411\u5DE6"
-                className={`rounded-lg p-1.5 transition-colors ${isLight ? 'text-gray-400 hover:bg-gray-100' : 'text-text-muted hover:bg-bg-hover'}`}
+                className={`rounded-lg p-1.5 transition-all duration-150 active:scale-90 ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted hover:bg-bg-hover hover:text-text-primary'}`}
                 onClick={() => scrollBy(-320)}
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -677,7 +727,7 @@ export default function KanbanBoard({
               <button
                 type="button"
                 aria-label="\u5411\u53F3"
-                className={`rounded-lg p-1.5 transition-colors ${isLight ? 'text-gray-400 hover:bg-gray-100' : 'text-text-muted hover:bg-bg-hover'}`}
+                className={`rounded-lg p-1.5 transition-all duration-150 active:scale-90 ${isLight ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-text-muted hover:bg-bg-hover hover:text-text-primary'}`}
                 onClick={() => scrollBy(320)}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -696,10 +746,10 @@ export default function KanbanBoard({
                 key={st}
                 type="button"
                 onClick={() => scrollToStage(st)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-semibold whitespace-nowrap flex items-center gap-1.5 transition-colors ${
+                className={`shrink-0 rounded-xl px-3 py-1.5 text-[10px] font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all duration-150 active:scale-95 shadow-xs ${
                   isLight
-                    ? 'bg-white border border-gray-200 text-gray-600'
-                    : 'bg-white/[0.06] border border-white/10 text-text-muted'
+                    ? 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
+                    : 'bg-white/[0.06] border border-white/10 text-text-muted hover:border-white/20'
                 }`}
               >
                 <span className={`w-2 h-2 rounded-full ${theme.dotColor}`} />
@@ -732,6 +782,7 @@ export default function KanbanBoard({
                 sortDisabled={sortDisabled}
                 busyId={busyId}
                 onStageChange={handleStageSelect}
+                onRequestDelete={setDeleteTarget}
               />
             ))}
           </div>

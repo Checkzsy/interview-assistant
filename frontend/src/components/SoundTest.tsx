@@ -212,7 +212,7 @@ export default function SoundTest() {
             <ChevronDown className={`w-3.5 h-3.5 text-text-muted transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
           </button>
           {showDropdown && (
-            <div className="absolute top-full left-0 right-0 mt-1 glass border border-bg-hover/50 rounded-xl shadow-xl shadow-black/20 z-50 py-1 animate-fade-up">
+            <div className="absolute top-full left-0 right-0 mt-1 glass border border-bg-hover/50 rounded-2xl shadow-2xl shadow-black/30 backdrop-blur-xl z-50 py-1.5 animate-popover-in">
               {scenarios.map((s) => (
                 <button
                   key={s.id}

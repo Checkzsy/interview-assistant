@@ -299,7 +299,7 @@ export default function App() {
               <div
                 role="menu"
                 aria-label="功能模块"
-                className="absolute left-0 top-[calc(100%+0.5rem)] z-40 min-w-[180px] rounded-2xl border border-bg-hover/50 bg-bg-secondary/95 p-2 shadow-2xl shadow-black/10 backdrop-blur"
+                className="animate-popover-in absolute left-0 top-[calc(100%+0.5rem)] z-40 min-w-[180px] rounded-2xl border border-bg-hover/50 bg-bg-secondary/95 p-2 shadow-2xl shadow-black/25 backdrop-blur-xl"
               >
                 <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted">模块</div>
                 <div className="mt-1 space-y-1">
@@ -312,9 +312,9 @@ export default function App() {
                         setAppMode(key)
                         setModuleMenuOpen(false)
                       }}
-                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.98] ${
                         appMode === key
-                          ? 'bg-accent-blue text-white'
+                          ? 'bg-accent-blue text-white shadow-sm shadow-accent-blue/20'
                           : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
                       }`}
                     >
@@ -330,7 +330,7 @@ export default function App() {
           <div className="hidden overflow-x-auto bg-bg-tertiary/60 rounded-xl p-0.5 ml-1 border border-bg-hover/30 scrollbar-none md:flex" role="tablist" aria-label="功能模块">
             {APP_MODE_TABS.map(([key, label]) => (
               <button key={key} role="tab" aria-selected={appMode === key} onClick={() => setAppMode(key)}
-                className={`px-2.5 md:px-3 py-1.5 text-xs rounded-[10px] transition-all duration-200 whitespace-nowrap flex-shrink-0 font-medium ${appMode === key ? 'bg-accent-blue text-white shadow-sm shadow-accent-blue/20' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover/50'}`}>
+                className={`px-2.5 md:px-3 py-1.5 text-xs rounded-[10px] transition-all duration-200 whitespace-nowrap flex-shrink-0 font-medium active:scale-[0.98] ${appMode === key ? 'bg-accent-blue text-white shadow-sm shadow-accent-blue/30 font-semibold' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover/50'}`}>
                 {label}
               </button>
             ))}
@@ -409,7 +409,7 @@ export default function App() {
               aria-haspopup="dialog"
               aria-expanded={sessionPopoverOpen}
               aria-label="打开会场设置"
-              className={`relative inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs border transition-all duration-200 flex-shrink-0
+              className={`relative inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs border transition-all duration-200 active:scale-95 flex-shrink-0
                 ${sessionPopoverOpen
                   ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue shadow-sm shadow-accent-blue/10'
                   : 'border-bg-hover/50 bg-bg-tertiary/50 text-text-secondary hover:border-accent-blue/40 hover:text-text-primary'}`}
@@ -435,7 +435,7 @@ export default function App() {
             <button
               type="button"
               onClick={toggleAssistTranscriptCollapsed}
-              className="hidden md:inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-accent-blue transition-all duration-200 border border-transparent hover:border-accent-blue/20 flex-shrink-0"
+              className="hidden md:inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-accent-blue transition-all duration-200 active:scale-95 border border-transparent hover:border-accent-blue/20 flex-shrink-0"
               title={assistTranscriptCollapsed ? '显示实时转录面板 (⌘⇧J / Ctrl+⇧+J)' : '隐藏实时转录面板 (⌘⇧J / Ctrl+⇧+J)'}
               aria-label={assistTranscriptCollapsed ? '显示实时转录面板' : '隐藏实时转录面板'}
               aria-expanded={!assistTranscriptCollapsed}
@@ -451,7 +451,7 @@ export default function App() {
         <button
           type="button"
           onClick={toggleSettings}
-          className="inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-text-primary transition-all duration-200 border border-transparent hover:border-bg-hover/40"
+          className="inline-flex items-center justify-center min-h-[32px] min-w-[32px] p-1.5 rounded-xl hover:bg-bg-tertiary/60 text-text-muted hover:text-text-primary transition-all duration-200 active:scale-95 border border-transparent hover:border-bg-hover/40"
           title="设置中心 (外观 / 偏好 / 模型 / 隐私 / 快捷键)"
           aria-label="打开设置"
         >
@@ -462,7 +462,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => window.electronAPI?.minimizeWindow()}
-              className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover/60 text-text-muted hover:text-text-primary transition-colors duration-150"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover/60 text-text-muted hover:text-text-primary transition-all duration-150 active:scale-90"
               title="最小化"
               aria-label="最小化窗口"
             >
@@ -471,7 +471,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => window.electronAPI?.quitApp()}
-              className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-accent-red/80 text-text-muted hover:text-white transition-colors duration-150"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-accent-red/80 text-text-muted hover:text-white transition-all duration-150 active:scale-90"
               title="退出"
               aria-label="退出应用"
             >
