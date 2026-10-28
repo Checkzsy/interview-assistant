@@ -69,7 +69,7 @@ jobs:
 
             Review the diff carefully:
             - If the UI changes are intentional, merge this PR.
-            - If unexpected pixels changed, **do not merge** — investigate first.
+            - If unexpected pixels changed, **do not merge** --- investigate first.
           add-paths: |
             frontend/e2e/__screenshots__/**
           delete-branch: true
