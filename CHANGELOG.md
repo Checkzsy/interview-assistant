@@ -1,5 +1,50 @@
 # 修复日志
 
+## 2026-10-28 - v1.2.10 启动期隐身空窗修复 + 捕获能力可见化
+
+### 🐛 缺陷修复
+
+#### 1. 启动瞬间在录屏/屏幕共享里露出一帧窗口框
+
+- 主窗口此前只在 `new BrowserWindow()` 之后同步调一次 `setContentProtection(true)`，
+  然后 `ready-to-show` 直接 `show()`。Windows 上窗口从隐藏到可见的**首次 DWM 合成**
+  存在属性同步窗口，那一帧可能在 affinity 落到合成层之前被抓到 ——
+  表现就是「启动瞬间有个框，完全启动后隐身」。
+- 改为**屏外预热**：Windows 下主窗初始位置放在所有显示器之外，`ready-to-show` 时先
+  `showInactive()` 完成一次受保护的首帧合成，80ms 后再移回主屏居中并聚焦。
+- `show` 事件里补三次保护位（0ms / 50ms / 300ms），覆盖 DWM 从隐藏到可见的同步窗口；
+  全部走 `applyMainWindowProtection`，内部尊重用户手动关闭（`_contentProtection === false`）。
+- 悬浮窗 `showOverlayWindow()` 调整为**先落实保护位再 show，show 后补一次**，
+  此前是 show 之后才设置，同样存在一帧空窗。
+- 新增 `recenterWindowIfOffscreen()` 与统一入口 `revealMainWindow()`：托盘、`Ctrl+B`、
+  `show-window` IPC、overlay 收起、`activate` 等所有「把主窗给用户看」的路径都走同一处，
+  避免屏外预热的窗口被漏在屏幕外；另有 15s 兜底解除预热态，防止 `ready-to-show`
+  因渲染异常未触发时窗口永久不可见。
+
+#### 2. 「隐身到底是不是真隐身」在界面上不可见
+
+- 新增 `desktop/captureCapability.js`（纯函数，可单测）：按平台与 Windows build 判断
+  `WDA_EXCLUDEFROMCAPTURE`（build ≥ 19041，真·窗口排除）与 `WDA_MONITOR`
+  （旧系统，捕获时是黑块，反而更显眼）两种模式，macOS 走 ScreenCaptureKit 分支。
+- 新增 IPC `get-capture-capability`、`set-content-protection`，`get-window-state` 附带
+  `captureCapability` 字段；preload 同步暴露 `getCaptureCapability` / `setContentProtection`。
+- 托盘菜单的「屏幕共享隐身」改为共享 `setMainWindowContentProtection()`，勾选状态与
+  实际保护位一致（此前固定 `checked: true`，用户关掉后托盘仍显示开启）。
+- 设置 → 工作模式新增「屏幕共享隐身」卡片：开关 + 当前平台能力说明，
+  旧系统上明确提示「黑块回退可能反而引起注意」，并说明内核级监控、硬件采集卡、
+  RDP、摄像头拍屏不在覆盖范围内。浏览器模式（无 `electronAPI`）只给说明不给开关。
+- 删除原先「macOS 15+ ScreenCaptureKit 会绕过保护位」的笼统说明 ——
+  主进程已通过 `enable ScreenCaptureKitMac` + 关闭旧 capturer 走排除路径，
+  文案改为按实际探测结果展示。
+
+### 🧪 测试
+
+- `desktop/captureCapability.test.js`：build 边界（19040/19041/22631）、无法解析的版本号、
+  macOS 与未知平台分支。
+- `desktop/preload.test.js`：新增 `setContentProtection` / `getCaptureCapability` 通道断言。
+- `PreferencesTab.test.tsx`：浏览器模式无开关只给说明、真隐身能力展示与开关调用、
+  黑块回退告警。
+
 ## 2026-10-28 - v1.2.9 修复 v1.2.8 引入的看板乱码、抽屉透明与弹窗错位
 
 v1.2.8 的 UI 升级引入了一批静默失效的样式与一处文案渲染退化，本版全部修正。

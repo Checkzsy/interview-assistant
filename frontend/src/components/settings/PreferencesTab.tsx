@@ -9,6 +9,9 @@ import {
   ChevronDown,
   BookOpen,
   Keyboard,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldOff,
 } from 'lucide-react'
 import { useInterviewStore } from '@/stores/configStore'
 import { useShortcutsStore } from '@/stores/shortcutsStore'
@@ -111,7 +114,47 @@ export default function PreferencesTab() {
   const [kbTopK, setKbTopK] = useState(4)
   const [kbDeadlineMs, setKbDeadlineMs] = useState(150)
   const [kbAsrDeadlineMs, setKbAsrDeadlineMs] = useState(80)
+  const [protectionEnabled, setProtectionEnabled] = useState(true)
+  const [captureCapability, setCaptureCapability] = useState<CaptureCapability | null>(null)
   const autoSave = useAutoSaveSetting<Record<string, unknown>>(updateConfigAndRefresh)
+
+  // 屏幕共享隐身状态：开关 + 当前平台捕获能力（是否为真·窗口排除）。
+  // 浏览器模式下没有 electronAPI，保持默认值不报错。
+  useEffect(() => {
+    const api = window.electronAPI
+    if (!api) return
+    let cancelled = false
+    const load = async () => {
+      let nextCapability: CaptureCapability | null = null
+      try {
+        const state = await api.getWindowState()
+        if (cancelled) return
+        setProtectionEnabled(state.contentProtection !== false)
+        nextCapability = state.captureCapability ?? null
+      } catch { /* ignore */ }
+      // getWindowState 没带能力信息时，走独立探测接口兜底
+      if (!nextCapability) {
+        try {
+          nextCapability = (await api.getCaptureCapability?.()) ?? null
+        } catch { /* ignore */ }
+      }
+      if (!cancelled && nextCapability) setCaptureCapability(nextCapability)
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [])
+
+  const toggleProtection = async (next: boolean) => {
+    setProtectionEnabled(next)
+    const api = window.electronAPI
+    if (!api) return
+    try {
+      if (api.setContentProtection) await api.setContentProtection(next)
+      else await api.toggleContentProtection()
+    } catch {
+      setProtectionEnabled(!next)
+    }
+  }
 
   useEffect(() => {
     if (config?.answer_autoscroll_bottom_px != null) {
@@ -295,12 +338,60 @@ export default function PreferencesTab() {
             </button>
           )}
         </div>
-        <div className="mb-2 p-2.5 rounded-lg bg-accent-amber/10 border border-accent-amber/30 text-[11px] text-text-secondary leading-relaxed">
-          <div className="font-semibold text-accent-amber mb-0.5">反截图检测说明</div>
-          <div>
-            Windows 上通过 <code className="font-mono text-[10px] bg-bg-tertiary/60 px-1 rounded">setContentProtection</code> 可稳定避免被屏幕共享软件截图；
-            macOS 15+ 的 <span className="font-mono text-[10px]">ScreenCaptureKit</span> 会绕过保护位，实际效果请以你自己的环境测试为准。
+        {/* 屏幕共享隐身：开关 + 当前平台真实能力，避免用户误以为「开了就绝对隐身」 */}
+        <div
+          className={`mb-2 rounded-lg border p-2.5 text-[11px] leading-relaxed ${
+            protectionEnabled && captureCapability?.supported !== false
+              ? 'bg-accent-green/10 border-accent-green/30'
+              : 'bg-accent-amber/10 border-accent-amber/30'
+          }`}
+          data-testid="screen-protection-card"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {protectionEnabled
+                ? captureCapability?.supported === false
+                  ? <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0 text-accent-amber" />
+                  : <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0 text-accent-green" />
+                : <ShieldOff className="w-3.5 h-3.5 flex-shrink-0 text-text-muted" />}
+              <span className="font-semibold text-text-primary">屏幕共享隐身</span>
+            </div>
+            {window.electronAPI && (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={protectionEnabled}
+                aria-label="屏幕共享隐身"
+                onClick={() => void toggleProtection(!protectionEnabled)}
+                className={`relative flex-shrink-0 w-8 h-4.5 rounded-full transition-colors ${
+                  protectionEnabled ? 'bg-accent-green' : 'bg-bg-hover'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all ${
+                    protectionEnabled ? 'left-[18px]' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            )}
           </div>
+          <p className="mt-1 text-text-secondary">
+            {!window.electronAPI
+              ? '浏览器模式不支持窗口级隐身，需使用桌面客户端。'
+              : !protectionEnabled
+                ? '已关闭：窗口会正常出现在录屏与屏幕共享画面中。'
+                : captureCapability
+                  ? `${captureCapability.label}。${captureCapability.detail}`
+                  : '正在探测当前系统的窗口捕获能力…'}
+          </p>
+          {protectionEnabled && captureCapability?.supported === false && (
+            <p className="mt-1 text-accent-amber">
+              当前系统上隐身表现为「黑块」而非消失，可能反而引起注意；建议降低窗口不透明度或改用提词模式。
+            </p>
+          )}
+          <p className="mt-1 text-text-muted">
+            仅覆盖走系统窗口捕获 API 的会议/录屏软件；内核级监控、硬件采集卡、RDP 远程桌面与摄像头拍屏不在覆盖范围内。
+          </p>
         </div>
         {overlayEnabled && (
           <>

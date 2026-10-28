@@ -18,6 +18,7 @@ vi.mock('@/lib/examOverlay', () => ({
 describe('PreferencesTab', () => {
   afterEach(() => {
     vi.useRealTimers()
+    delete (window as unknown as { electronAPI?: unknown }).electronAPI
   })
 
   beforeEach(() => {
@@ -210,5 +211,81 @@ describe('PreferencesTab', () => {
 
     expect(useUiPrefsStore.getState().interviewOverlayPromptAutoFollow).toBe(true)
     expect(localStorage.getItem('ia_overlay_prompt_auto_follow')).toBe('1')
+  })
+
+  it('explains that window-level stealth needs the desktop client in browser mode', () => {
+    render(<PreferencesTab />)
+
+    fireEvent.click(screen.getByText('工作模式'))
+
+    expect(screen.getByTestId('screen-protection-card')).toBeInTheDocument()
+    expect(screen.getByText(/浏览器模式不支持窗口级隐身/)).toBeInTheDocument()
+    // 浏览器模式没有开关，避免给出一个点了没反应的按钮
+    expect(screen.queryByRole('switch', { name: '屏幕共享隐身' })).toBeNull()
+  })
+
+  it('reports the real capture capability and toggles protection through electronAPI', async () => {
+    const setContentProtection = vi.fn(() => Promise.resolve(false))
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      getWindowState: vi.fn(() => Promise.resolve({
+        alwaysOnTop: false,
+        contentProtection: true,
+        visible: true,
+        captureCapability: {
+          platform: 'win32',
+          supported: true,
+          mode: 'exclude',
+          label: '窗口排除（真隐身）',
+          detail: 'Windows build 19045 支持 WDA_EXCLUDEFROMCAPTURE。',
+        },
+      })),
+      getCaptureCapability: vi.fn(() => Promise.resolve(null)),
+      setContentProtection,
+    }
+
+    render(<PreferencesTab />)
+    fireEvent.click(screen.getByText('工作模式'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/窗口排除（真隐身）/)).toBeInTheDocument()
+    })
+
+    const toggle = screen.getByRole('switch', { name: '屏幕共享隐身' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(setContentProtection).toHaveBeenCalledWith(false)
+    })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText(/已关闭：窗口会正常出现在录屏与屏幕共享画面中/)).toBeInTheDocument()
+  })
+
+  it('warns when the system can only fall back to black-block masking', async () => {
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      getWindowState: vi.fn(() => Promise.resolve({
+        alwaysOnTop: false,
+        contentProtection: true,
+        visible: true,
+        captureCapability: {
+          platform: 'win32',
+          supported: false,
+          mode: 'monitor',
+          label: '黑块遮挡（旧系统回退）',
+          detail: 'Windows build 19040 低于 19041，只能退化为黑块遮挡。',
+        },
+      })),
+      getCaptureCapability: vi.fn(() => Promise.resolve(null)),
+      setContentProtection: vi.fn(() => Promise.resolve(true)),
+    }
+
+    render(<PreferencesTab />)
+    fireEvent.click(screen.getByText('工作模式'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/黑块遮挡（旧系统回退）/)).toBeInTheDocument()
+    })
+    expect(screen.getByText(/可能反而引起注意/)).toBeInTheDocument()
   })
 })

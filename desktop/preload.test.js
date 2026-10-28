@@ -58,3 +58,16 @@ test('preload exposes desktop toast and config update listeners', () => {
   assert.equal(typeof api.onDesktopToast, 'function');
   assert.equal(typeof api.onConfigUpdated, 'function');
 });
+
+test('preload exposes explicit content protection setter and capture capability probe', async () => {
+  assert.equal(typeof api.setContentProtection, 'function');
+  assert.equal(typeof api.getCaptureCapability, 'function');
+
+  invoked.length = 0;
+  await api.setContentProtection(false);
+  assert.equal(invoked[0], 'set-content-protection');
+
+  invoked.length = 0;
+  await api.getCaptureCapability();
+  assert.equal(invoked[0], 'get-capture-capability');
+});

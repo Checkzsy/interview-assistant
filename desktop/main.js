@@ -1,5 +1,6 @@
 const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen } = require('electron');
 const { spawn } = require('child_process');
+const os = require('os');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -159,6 +160,89 @@ function applyOverlayVisuals(win) {
   if (!win || win.isDestroyed()) return;
   win.setContentProtection(true);
   win.setBackgroundColor('#00000000');
+}
+
+// ── 屏幕捕获能力探测 ────────────────────────────────────────────
+// 判断逻辑在 captureCapability.js（纯函数，可单测），这里只绑定运行时。
+const { detectCaptureCapability: detectCaptureCapabilityFor } = require('./captureCapability');
+
+function detectCaptureCapability() {
+  return detectCaptureCapabilityFor(process.platform, os.release());
+}
+
+// 主窗保护：屏幕共享隐身的总开关，所有入口都从这里走。
+// _contentProtection === false 表示用户主动关闭，任何时机都不该被强行改回开启。
+function applyMainWindowProtection(win) {
+  if (!win || win.isDestroyed()) return;
+  if (win._contentProtection === false) return;
+  win.setContentProtection(true);
+}
+
+let trayProtectionItem = null;
+
+function setMainWindowContentProtection(enabled) {
+  const next = Boolean(enabled);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow._contentProtection = next;
+    mainWindow.setContentProtection(next);
+  }
+  if (trayProtectionItem) trayProtectionItem.checked = next;
+  return next;
+}
+
+// 窗口是否落在任一显示器上（留 40px 容差，允许部分出屏）。
+function isBoundsOnAnyDisplay(bounds) {
+  return screen.getAllDisplays().some(({ workArea: area }) => (
+    bounds.x + bounds.width > area.x + 40
+    && bounds.x < area.x + area.width - 40
+    && bounds.y + bounds.height > area.y + 40
+    && bounds.y < area.y + area.height - 40
+  ));
+}
+
+// 预热位置在屏外，任何「用户想看窗口」的路径都要保证它能回到屏内。
+function recenterWindowIfOffscreen(win) {
+  if (!win || win.isDestroyed()) return;
+  if (isBoundsOnAnyDisplay(win.getBounds())) return;
+  const area = screen.getPrimaryDisplay().workArea;
+  const [w, h] = win.getSize();
+  win.setPosition(
+    Math.round(area.x + (area.width - w) / 2),
+    Math.round(area.y + (area.height - h) / 2),
+  );
+}
+
+// 所有「把主窗显示给用户」的入口统一走这里：
+// 结束预热态 + 保证窗口在屏内 + 补保护位 + 抢焦点。
+// 分散调用 mainWindow.show() 的写法在屏外预热方案下会漏掉 recenter，窗口就永久看不见了。
+function revealMainWindow({ focus = true } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow._preheatPending = false;
+  applyMainWindowProtection(mainWindow);
+  recenterWindowIfOffscreen(mainWindow);
+  mainWindow.show();
+  if (focus) mainWindow.focus();
+}
+
+// 启动预热：窗口先在所有显示器之外完成首帧合成。
+// SetWindowDisplayAffinity 是同步调用，但窗口从隐藏到可见的第一次 DWM 合成
+// 存在一个属性同步窗口；在屏幕外 show 一次可以让 affinity 在“上屏”之前就位，
+// 录屏里就不会出现启动瞬间的那一帧框。
+function getMainWindowPreheatPosition(width, height) {
+  const displays = screen.getAllDisplays();
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const display of displays) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+    return { x: -10000, y: -10000 };
+  }
+  return {
+    x: Math.round(minX - width - 200),
+    y: Math.round(minY - height - 200),
+  };
 }
 
 function getOverlayStateFilePath() {
@@ -376,14 +460,18 @@ function startPythonBackend() {
 
 function createWindow() {
   const isWindows = process.platform === 'win32';
+  const preheat = isWindows ? getMainWindowPreheatPosition(1200, 800) : null;
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    // Windows: 首帧先在屏幕外合成, 避免启动瞬间那一帧框被录屏抓到
+    ...(preheat ? { x: preheat.x, y: preheat.y } : {}),
     minWidth: 800,
     minHeight: 500,
     title: APP_DISPLAY_NAME,
     frame: false,
     show: false,
+    backgroundColor: '#0f1115',
     // Windows 下不在任务栏显示，只在托盘
     skipTaskbar: isWindows,
     webPreferences: {
@@ -393,7 +481,26 @@ function createWindow() {
     },
   });
 
-  mainWindow.setContentProtection(true);
+  mainWindow._contentProtection = true;
+  mainWindow._preheatPending = Boolean(preheat);
+  applyMainWindowProtection(mainWindow);
+
+  // show 之后多补几次保护位：覆盖 DWM 从隐藏到可见的属性同步窗口。
+  // 幂等，且尊重用户手动关闭（applyMainWindowProtection 内部判断）。
+  mainWindow.on('show', () => {
+    applyMainWindowProtection(mainWindow);
+    // 预热阶段窗口故意在屏外，别急着拉回来；其余任何 show 都要保证可见。
+    if (!mainWindow._preheatPending) recenterWindowIfOffscreen(mainWindow);
+    setTimeout(() => applyMainWindowProtection(mainWindow), 50);
+    setTimeout(() => applyMainWindowProtection(mainWindow), 300);
+  });
+
+  // 兜底：ready-to-show 因渲染异常没触发时，预热态不能永久锁住窗口可见性。
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow._preheatPending) return;
+    mainWindow._preheatPending = false;
+    if (mainWindow.isVisible()) recenterWindowIfOffscreen(mainWindow);
+  }, 15000);
 
   // 每次启动清除缓存，确保加载到最新的前端构建（避免设置里识别引擎等不更新）
   mainWindow.webContents.session.clearCache().then(() => {
@@ -407,7 +514,21 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!isWindows) {
+      mainWindow.show();
+      return;
+    }
+    // 屏外预热：先在不可见区域 showInactive，让 DWM 在受保护状态下建立首帧合成层
+    applyMainWindowProtection(mainWindow);
+    mainWindow.showInactive();
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      applyMainWindowProtection(mainWindow);
+      recenterWindowIfOffscreen(mainWindow);
+      mainWindow._preheatPending = false;
+      mainWindow.focus();
+    }, 80);
   });
 
   // Windows 下最小化 = 隐藏到托盘
@@ -557,11 +678,14 @@ function showOverlayWindow() {
   }
   applyOverlayModeBounds();
   overlayWindow.setFocusable(false);
+  // 先落实保护位再 show，避免 show 那一帧处于未受保护状态
+  applyOverlayVisuals(overlayWindow);
   if (process.platform === 'darwin' || process.platform === 'win32') {
     overlayWindow.showInactive();
   } else {
     overlayWindow.show();
   }
+  // show 之后再补一次，覆盖 DWM 首次合成的属性同步窗口
   applyOverlayVisuals(overlayWindow);
   keepWindowInFront(overlayWindow);
 }
@@ -571,8 +695,7 @@ function toggleWindow() {
   if (mainWindow.isVisible()) {
     mainWindow.hide();
   } else {
-    mainWindow.show();
-    mainWindow.focus();
+    revealMainWindow();
   }
 }
 
@@ -685,7 +808,7 @@ function createTray() {
   tray.setToolTip(APP_DISPLAY_NAME);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: '显示窗口', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+    { label: '显示窗口', click: () => revealMainWindow() },
     { label: '隐藏到托盘', click: () => toggleWindow() },
     { type: 'separator' },
     {
@@ -699,19 +822,22 @@ function createTray() {
     {
       label: '屏幕共享隐身',
       type: 'checkbox',
-      checked: true,
+      checked: mainWindow?._contentProtection !== false,
       click: (menuItem) => {
-        mainWindow?.setContentProtection(menuItem.checked);
+        setMainWindowContentProtection(menuItem.checked);
       },
     },
     { type: 'separator' },
     { label: '退出', click: () => { isQuitting = true; app.quit(); } },
   ]);
 
+  trayProtectionItem = contextMenu.items.find((item) => item.label === '屏幕共享隐身') || null;
+  if (trayProtectionItem) trayProtectionItem.checked = mainWindow?._contentProtection !== false;
+
   tray.setContextMenu(contextMenu);
-  tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); });
+  tray.on('click', () => revealMainWindow());
   // Windows 双击托盘图标也能显示
-  tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus(); });
+  tray.on('double-click', () => revealMainWindow());
 }
 
 function isFocusOverlayActive() {
@@ -1004,7 +1130,7 @@ ipcMain.handle('updater:install', async () => {
   return result;
 });
 
-ipcMain.handle('show-window', () => { mainWindow?.show(); mainWindow?.focus(); });
+ipcMain.handle('show-window', () => revealMainWindow());
 ipcMain.handle('get-shortcuts', () => shortcuts);
 ipcMain.handle('update-shortcuts', (_event, updates) => {
   const next = JSON.parse(JSON.stringify(shortcuts));
@@ -1031,17 +1157,20 @@ ipcMain.handle('toggle-always-on-top', () => {
 });
 ipcMain.handle('toggle-content-protection', () => {
   if (!mainWindow) return true;
-  const webContents = mainWindow.webContents;
   const isProtected = mainWindow._contentProtection !== false;
-  mainWindow._contentProtection = !isProtected;
-  mainWindow.setContentProtection(!isProtected);
-  return !isProtected;
+  return setMainWindowContentProtection(!isProtected);
+});
+ipcMain.handle('set-content-protection', (_event, enabled) => {
+  if (!mainWindow) return true;
+  return setMainWindowContentProtection(enabled !== false);
 });
 ipcMain.handle('get-window-state', () => ({
   alwaysOnTop: mainWindow?.isAlwaysOnTop() ?? false,
   contentProtection: mainWindow?._contentProtection !== false,
   visible: mainWindow?.isVisible() ?? false,
+  captureCapability: detectCaptureCapability(),
 }));
+ipcMain.handle('get-capture-capability', () => detectCaptureCapability());
 ipcMain.handle('sync-overlay-window', (_event, payload = {}) => {
   const style = {};
   if ('opacity' in payload) {
@@ -1104,8 +1233,7 @@ ipcMain.handle('sync-overlay-window', (_event, payload = {}) => {
     } else {
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow._hiddenByOverlay) {
         mainWindow._hiddenByOverlay = false;
-        mainWindow.show();
-        mainWindow.focus();
+        revealMainWindow();
       }
     }
   }
@@ -1334,8 +1462,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  mainWindow?.show();
-  mainWindow?.focus();
+  revealMainWindow();
 });
 
 app.on('will-quit', () => {

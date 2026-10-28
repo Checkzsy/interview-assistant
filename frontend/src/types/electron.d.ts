@@ -14,7 +14,14 @@ declare global {
       resetShortcuts: () => Promise<{ ok: boolean; error?: string; shortcuts: Record<string, unknown> }>
       toggleAlwaysOnTop: () => Promise<boolean>
       toggleContentProtection: () => Promise<boolean>
-      getWindowState: () => Promise<{ alwaysOnTop: boolean; contentProtection: boolean; visible: boolean }>
+      setContentProtection?: (enabled: boolean) => Promise<boolean>
+      getWindowState: () => Promise<{
+        alwaysOnTop: boolean
+        contentProtection: boolean
+        visible: boolean
+        captureCapability?: CaptureCapability
+      }>
+      getCaptureCapability?: () => Promise<CaptureCapability>
       syncOverlayWindow?: (payload: Partial<OverlayStatePayload> & { visible?: boolean }) => Promise<{ ok: boolean; visible: boolean }>
       resizeOverlayWindow?: (payload: { width?: number; height?: number }) => Promise<{ ok: boolean; width?: number; height?: number; skipped?: boolean }>
       destroyOverlay?: () => Promise<{ ok: boolean }>
@@ -36,6 +43,15 @@ declare global {
       installUpdate?: () => Promise<{ ok: boolean; error?: string }>
       onUpdaterState?: (callback: (state: UpdaterState) => void) => (() => void)
     }
+  }
+
+  interface CaptureCapability {
+    platform: string
+    /** Windows: build >= 19041 才是真正的「窗口排除」，否则只是黑块回退 */
+    supported: boolean
+    mode: 'exclude' | 'monitor' | 'screencapturekit' | 'native'
+    label: string
+    detail: string
   }
 
   interface UpdaterState {
