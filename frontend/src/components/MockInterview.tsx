@@ -277,7 +277,7 @@ export default function MockInterview() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-          <section className="rounded-2xl border border-bg-hover bg-bg-secondary p-4">
+          <section className="rounded-2xl border border-bg-hover bg-bg-secondary p-4 lg:col-start-1 lg:row-start-1">
             <h2 className="mb-4 text-sm font-semibold text-text-primary">面试设置</h2>
             <div className="space-y-4">
               <div>
@@ -354,7 +354,7 @@ export default function MockInterview() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-bg-hover bg-bg-secondary p-4">
+          <section className="rounded-2xl border border-bg-hover bg-bg-secondary p-4 lg:col-start-1 lg:row-start-2">
             <h2 className="mb-3 text-sm font-semibold text-text-primary">历史会话</h2>
             {sessions.length === 0 ? (
               <p className="text-xs text-text-muted">暂无历史会话</p>
@@ -402,7 +402,7 @@ export default function MockInterview() {
               </ul>
             )}
           </section>
-          <section className="space-y-4">
+          <section className="space-y-4 lg:col-start-2 lg:row-start-1 lg:row-end-3">
             <div className="rounded-2xl border border-bg-hover bg-bg-secondary p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -541,7 +541,7 @@ export default function MockInterview() {
                     className="w-full resize-y rounded-lg border border-bg-hover bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-blue/60 disabled:opacity-70"
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <label className="inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-bg-hover px-4 text-sm font-medium text-text-muted transition hover:text-text-secondary disabled:cursor-not-allowed disabled:opacity-50">
+                    <label className="relative inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-bg-hover px-4 text-sm font-medium text-text-muted transition hover:text-text-secondary disabled:cursor-not-allowed disabled:opacity-50">
                       {audioSubmitting ? '转写中…' : '上传语音回答（WAV）'}
                       <input
                         type="file"
