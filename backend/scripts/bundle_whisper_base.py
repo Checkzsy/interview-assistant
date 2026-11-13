@@ -219,7 +219,24 @@ def smoke_transcribe(model_dir: Path) -> str:
                 os.environ[key] = value
 
 
+def _make_console_tolerant() -> None:
+    """让 CLI 输出在非 UTF-8 控制台下不崩。
+
+    Windows runner / 本地 cmd 的默认代码页是 cp1252 / cp936，直接 print 中文会
+    UnicodeEncodeError。发布 workflow 曾在模型下载成功后仅因最后一行 print 而整步失败。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main(argv: Iterable[str] | None = None, downloader: Downloader | None = None) -> int:
+    _make_console_tolerant()
     parser = argparse.ArgumentParser(description="Stage/verify the bundled whisper base model")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -238,22 +255,22 @@ def main(argv: Iterable[str] | None = None, downloader: Downloader | None = None
     try:
         if args.command == "stage":
             if not args.dest:
-                print("错误: stage 需要 --dest <目录>", file=sys.stderr)
+                print("ERROR: stage requires --dest <dir>", file=sys.stderr)
                 return 2
             dest = stage_model(Path(args.dest), downloader=downloader)
             manifest = json.loads((dest / MANIFEST_NAME).read_text(encoding="utf-8"))
-            print(f"内置 Whisper 模型已就绪: {dest} (revision {manifest['revision']})")
+            print(f"Bundled Whisper model ready: {dest} (revision {manifest['revision']})")
             return 0
         if args.command == "verify-packaged":
             model_dir = verify_packaged(args.name, args.root)
-            print(f"打包产物已包含 Whisper 模型: {model_dir}")
+            print(f"Packaged output contains Whisper model: {model_dir}")
             return 0
         if args.command == "smoke":
             text = smoke_transcribe(Path(args.dest) if args.dest else default_dest())
-            print(f"离线转写结果: {text}")
+            print(f"Offline transcription: {text}")
             return 0 if text else 1
     except BundleError as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
     return 2

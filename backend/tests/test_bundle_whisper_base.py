@@ -295,3 +295,30 @@ def test_main_stage_writes_a_manifest(tmp_path):
     assert rc == 0
     manifest = json.loads((dest / bundle.MANIFEST_NAME).read_text(encoding="utf-8"))
     assert manifest["revision"] == bundle.MODEL_REVISION
+
+
+def test_cli_output_survives_a_non_utf8_console(monkeypatch, tmp_path, capsys):
+    """Windows CUDA/CI 控制台默认是 cp1252，直接 print 中文会 UnicodeEncodeError。
+
+    发布 workflow 曾在 stage 下载成功后仅因最后一行 print 而整步失败。
+    """
+    import io
+
+    source = tmp_path / "cache-model"
+    _write_model(source)
+    dest = tmp_path / "assets" / "whisper-base"
+
+    def ascii_stdout():
+        # 模拟 cp1252：非 ASCII 字符无法编码。
+        return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+
+    monkeypatch.setattr(sys, "stdout", ascii_stdout())
+    monkeypatch.setattr(sys, "stderr", ascii_stdout())
+
+    exit_code = bundle.main(
+        ["stage", "--dest", str(dest)],
+        downloader=lambda target: _copy_model(source, target),
+    )
+
+    assert exit_code == 0
+    _write_model(dest)  # 保留磁盘状态断言，避免被 monkeypatch 的 stdout 干扰
