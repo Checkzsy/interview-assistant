@@ -68,7 +68,7 @@ def test_validate_model_dir_rejects_symlinks(tmp_path):
         (tmp_path / "config.json").symlink_to(real)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks unavailable on this platform")
-    with pytest.raises(bundle.BundleError, match="symlink"):
+    with pytest.raises(bundle.BundleError, match="符号链接"):
         bundle.validate_model_dir(tmp_path)
 
 
