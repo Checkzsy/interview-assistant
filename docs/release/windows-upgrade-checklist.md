@@ -36,7 +36,8 @@
 3. [ ] 确认向导的默认目录等于当前安装目录（来自注册表 `HK{CU,LM}\Software\<GUID>\InstallLocation`）。
 4. [ ] 改选一个全新目录后继续安装，确认旧目录中的程序文件被卸载、新目录中出现新版本。
 5. [ ] 启动新版本，确认快捷键、模型配置、五个 SQLite 库（复盘/知识库/求职看板/模拟面试/简历历史）全部仍在。
-6. [ ] 重新打开「静默安装」开关，确认后续更新回到就地静默升级。
+6. [ ] **v1.3.0 → v1.3.1 专项**：升级前确认 `%LOCALAPPDATA%\Programs\Interview Assistant\resources\backend\_internal\data\kb.sqlite` 存在；升级后该路径应消失，且 `%APPDATA%\interview-assistant-desktop\data\kb.sqlite` 存在、文档数与升级前一致。
+7. [ ] 重新打开「静默安装」开关，确认后续更新回到就地静默升级。
 
 ## 自动更新验证
 
