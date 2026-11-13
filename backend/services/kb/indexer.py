@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from core.config import get_config
 from core.logger import get_logger
-from services.storage.paths import backend_root
+from services.storage.paths import data_dir
 
 from . import loaders as _loaders  # noqa: F401  触发 register 副作用
 from .chunker import chunk_doc
@@ -24,11 +24,19 @@ _DOC_FAIL_MSG = "不支持 .doc，请在 Word 里另存为 .docx 后再上传"
 
 
 def resolve_path(path_str: str) -> Path:
-    """相对路径按 backend_root 解析; 绝对路径原样返回。"""
+    """相对路径解析到数据目录（IA_DATA_DIR）; 绝对路径原样返回。
+
+    配置里的 data/kb、data/kb.sqlite 一直写作相对 backend/ 的路径，这里把开头的
+    data 段映射到 data_dir()，老配置不用迁移。若按 backend/ 解析，打包后知识库会
+    落在安装目录里，而 NSIS 升级会整目录删除 $INSTDIR，用户的文档和索引随之丢失。
+    """
     p = Path(path_str)
     if p.is_absolute():
         return p
-    return Path(backend_root()) / p
+    parts = p.parts
+    if parts and parts[0] == "data":
+        return Path(data_dir()).joinpath(*parts[1:])
+    return Path(data_dir()) / p
 
 
 def _resolved_db_path() -> str:

@@ -44,6 +44,27 @@ test('NSIS installer lets the user pick the installation directory', () => {
   assert.strictEqual(pkg.build.nsis.perMachine, false)
 })
 
+test('installer script migrates the legacy in-install knowledge base before uninstalling', () => {
+  // 1.2.x/1.3.0 stored kb.sqlite under resources/backend/.../data, which NSIS
+  // deletes with $INSTDIR during an upgrade. The custom include must move it to
+  // userData first, and customInit is the only hook that runs before that.
+  const pkg = require('./package.json')
+  assert.strictEqual(pkg.build.nsis.include, 'nsis/installer.nsh')
+
+  const script = fs.readFileSync(path.join(__dirname, 'nsis', 'installer.nsh'), 'utf8')
+  assert.match(script, /!macro\s+customInit/)
+  assert.match(script, /\$APPDATA\\\$\{APP_PACKAGE_NAME\}\\data/, 'must target the Electron userData data dir')
+  assert.match(script, /\\_internal\\data\\kb\.sqlite/, 'must recognise the packaged legacy layout')
+  assert.match(script, /robocopy/, 'must copy rather than print a warning')
+  assert.match(script, /\$\{IfNot\}\s+\$\{FileExists\}/, 'must not clobber an existing userData copy')
+
+  // NSIS reads included files with the system ANSI code page, not -INPUTCHARSET.
+  // A UTF-8 comment that cannot map to cp936/cp1252 aborts the installer build.
+  const bytes = fs.readFileSync(path.join(__dirname, 'nsis', 'installer.nsh'))
+  const nonAscii = bytes.findIndex((byte) => byte > 0x7f)
+  assert.strictEqual(nonAscii, -1, `installer.nsh must stay ASCII-only; non-ASCII byte at offset ${nonAscii}`)
+})
+
 test('backend build stages the bundled whisper model before PyInstaller', () => {
   const pkg = require('./package.json')
   const stageScript = pkg.scripts['bundle:whisper']

@@ -1,5 +1,31 @@
 # 修复日志
 
+## 2026-11-13 - v1.3.1 升级后知识库被清空
+
+### 🐛 缺陷修复
+
+#### 知识库落在安装目录，升级时被 NSIS 一并删除
+
+- 知识库的相对路径（`kb_dir`、`kb_db_path`、`kb_cache_dir`）由
+  `services/kb/indexer.py` 的 `resolve_path()` 按 `backend_root()` 解析，绕过了
+  `IA_DATA_DIR`。开发态落在 `backend/data/` 看不出问题，打包后就是
+  `$INSTDIR\resources\backend\_internal\data\`，即**安装目录内部**。
+- 升级时安装器先调用旧版卸载器（`uninstallOldVersion`，固定带 `--updated`），
+  卸载器执行 `RMDir /r $INSTDIR`，把 `kb.sqlite` 和 `data/kb/` 里上传的文档一起删掉。
+  `config.json` 和其它五个库走 `IA_DATA_DIR`，落在 `%APPDATA%`，所以只有知识库消失。
+- 修复：`resolve_path()` 把开头的 `data` 段映射到 `data_dir()`，与其它库同级；
+  老配置里的 `data/kb` 写法无需迁移。
+- 对已装旧版的用户，`desktop/nsis/installer.nsh` 通过 `build.nsis.include` 挂到
+  `.onInit`（早于卸载旧版），用 robocopy 把旧 `_internal/data` 搬到 userData；
+  目标已存在时跳过，不覆盖更新的数据。
+
+### 🧪 测试
+
+- `test_storage_paths.py::test_kb_relative_paths_follow_the_data_dir_override`
+  断言 KB 路径跟随 `IA_DATA_DIR`，且与 `knowledge.db` 同目录。
+- `packaging.test.js` 断言安装器引入了自定义脚本，且脚本包含迁移、跳过已存在等关键行为。
+- 用自定义脚本实跑一次 `electron-builder --win nsis`，确认 makensis 编译通过。
+
 ## 2026-11-13 - v1.3.0 离线语音识别 + 可选安装位置 + 静默安装开关
 
 ### 🐛 缺陷修复
@@ -34,9 +60,11 @@
     安装目录并就地覆盖升级，装完自动重启。
   - 关闭：不传任何参数，弹出安装向导；默认目录仍是当前安装位置，也可改选新位置。
     换位置时安装器先卸载旧位置再装到新位置。
-- 两种方式下 `config.json`、快捷键配置和五个 SQLite 库都保留在
+- 两种方式下 `config.json`、快捷键配置和 `knowledge.db`、`job_tracker.db`、`review.db`、
+  `mock_interview.db`、`resume_history.db` 都保留在
   `%APPDATA%\interview-assistant-desktop\`，与安装目录无关；卸载器始终带
   `--updated` 且未定义 `DELETE_APP_DATA_ON_UNINSTALL`，所以迁移配置无需复制文件。
+  （知识库 `kb.sqlite` 当时不在此列，见 v1.3.1。）
 
 ### 🧪 测试
 
