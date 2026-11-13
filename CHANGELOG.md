@@ -1,5 +1,56 @@
 # 修复日志
 
+## 2026-11-13 - v1.2.12 离线语音识别 + 可选安装位置 + 静默安装开关
+
+### 🐛 缺陷修复
+
+#### 1. 未联网机器 STT 测试超时（WinError 10060）
+
+- 安装包只带 faster-whisper 库，不带模型权重。`base` 模型首次使用时要访问
+  huggingface.co 下载约 145MB，在无法访问该域名的机器上直接抛
+  `LocalEntryNotFoundError: Got: ConnectTimeout: [WinError 10060]`，而
+  `/api/stt/test` 原样回显异常文本，用户看到的是原始英文报错。
+  设置页徽标只看凭据（Whisper 无需密钥），所以同时显示「配置完整」，自相矛盾。
+- 修复：安装包内置 `base` 模型（`backend/assets/whisper-base`，约 145MB），
+  打包时由 `backend/scripts/bundle_whisper_base.py` 从固定 revision
+  `ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66` 实体化下载；运行时 `base` 优先用
+  内置绝对路径加载，`small`/`medium`/`large-v3` 仍按需联网。
+- 加载失败改为可读中文提示，区分「内置文件缺失/损坏（重装）」「网络下载失败」
+  「缺少 faster-whisper 依赖」三种原因，不再直接回显底层异常。
+
+#### 2. 旧版下载的 base 模型成为冗余文件
+
+- 内置之后，旧版本下载到 `~/.cache/huggingface/hub/models--Systran--faster-whisper-base`
+  的副本不再被读取，白占约 145MB。
+- 修复：启动时一次性清理该目录并写入 `data/whisper-bundled-migration.json`
+  标记；只删 `base`，`small` 等其他档位仍依赖同一个共享缓存，不做连带删除。
+
+### ✨ 新增
+
+#### 更新时可选择安装位置 + 静默安装开关
+
+- 设置页「检查更新」卡片新增「静默安装」开关，本机持久化（`ia_update_silent_install`）：
+  - 开启（默认）：`/S --updated --force-run`，从注册表 `InstallLocation` 读出已有
+    安装目录并就地覆盖升级，装完自动重启。
+  - 关闭：不传任何参数，弹出安装向导；默认目录仍是当前安装位置，也可改选新位置。
+    换位置时安装器先卸载旧位置再装到新位置。
+- 两种方式下 `config.json`、快捷键配置和五个 SQLite 库都保留在
+  `%APPDATA%\interview-assistant-desktop\`，与安装目录无关；卸载器始终带
+  `--updated` 且未定义 `DELETE_APP_DATA_ON_UNINSTALL`，所以迁移配置无需复制文件。
+
+### 🧪 测试
+
+- 新增 `backend/tests/test_stt_whisper.py`：内置模型离线加载、缺文件逐项报错、
+  tokenizer 缺失时不回退联网、冗余缓存一次性清理且不影响其他档位。
+- 新增 `backend/tests/test_bundle_whisper_base.py`：固定 revision、必选文件、
+  符号链接与体积下限校验。
+- `desktop/updater.test.js` / `updater-ipc.test.js` / `preload.test.js` 覆盖
+  静默与向导两种参数组合，以及开关从渲染进程到安装器的透传。
+- `UpdateCard.test.tsx` 覆盖开关默认值、持久化与按钮文案切换。
+- 本地用打包后的 `backend.exe` 在 `HF_HUB_OFFLINE=1`、`HF_HOME` 指向空目录、
+  独立端口下实测 `/api/stt/test` 返回真实转写文本，证明内置模型路径在
+  PyInstaller 布局下解析正确。
+
 ## 2026-10-31 - v1.2.11 模拟面试布局修复
 
 ### 🐛 缺陷修复

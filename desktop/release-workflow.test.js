@@ -42,3 +42,22 @@ test('Windows release workflow rejects prerelease and mismatched versions', () =
   assert.match(source, /throw\s+['"]|throw new Error|exit 1|process\.exit\(1\)/);
   assert.match(source, /tag.*version|version.*tag/i);
 });
+
+test('Windows release workflow caches and verifies the bundled whisper model', () => {
+  const source = fs.readFileSync(workflowPath, 'utf8');
+
+  // 145MB model download per release; the Hugging Face cache is content-addressed.
+  assert.match(source, /actions\/cache@v4/);
+  assert.match(source, /\.cache[\/\\]huggingface/);
+
+  // The staged model must exist in the PyInstaller output and the release must
+  // fail loudly if a model-less installer would otherwise be published.
+  assert.match(source, /whisper-base/);
+  assert.match(source, /model\.bin/);
+  assert.match(source, /Test-Path/);
+  assert.match(source, /throw /);
+
+  const distIndex = source.indexOf('npm run dist');
+  const verifyIndex = source.lastIndexOf('whisper-base');
+  assert.ok(distIndex >= 0 && verifyIndex > distIndex, 'packaged model must be verified after the installer build');
+});

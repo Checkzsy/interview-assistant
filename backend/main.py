@@ -109,6 +109,14 @@ async def lifespan(app: FastAPI):
 
 def _preload_stt():
     try:
+        from services.storage.paths import data_dir
+        from services.stt.engines import _prune_superseded_whisper_cache
+
+        # 内置 base 模型之后，旧版联网下载的那份缓存是纯冗余，启动时清一次。
+        _prune_superseded_whisper_cache(data_dir())
+    except Exception as e:
+        _log.debug("Whisper cache prune skipped: %s", e)
+    try:
         cfg = get_config()
         engine = get_stt_engine()
         _log.info("STT preload start provider=%s", cfg.stt_provider)

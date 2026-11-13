@@ -30,9 +30,31 @@ function formatProgress(state: UpdaterState): string {
   return `${formatBytes(received)} / ${formatBytes(total)}（${pct}%）`
 }
 
+const SILENT_INSTALL_KEY = 'ia_update_silent_install'
+
+/** 本机偏好：更新时静默升级到现有位置，还是弹安装向导让用户选位置。 */
+function readSilentInstall(): boolean {
+  try {
+    return localStorage.getItem(SILENT_INSTALL_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 export default function UpdateCard() {
   const [state, setState] = useState<UpdaterState>(IDLE_STATE)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [silentInstall, setSilentInstall] = useState(readSilentInstall)
+
+  const toggleSilentInstall = () => {
+    const next = !silentInstall
+    setSilentInstall(next)
+    try {
+      localStorage.setItem(SILENT_INSTALL_KEY, next ? '1' : '0')
+    } catch {
+      /* 隐私模式等场景下写不进去，本次会话仍然生效 */
+    }
+  }
 
   useEffect(() => {
     const api = window.electronAPI
@@ -55,7 +77,7 @@ export default function UpdateCard() {
     window.electronAPI?.downloadUpdate?.().then(setState).catch(() => {})
   }
   const handleInstall = async () => {
-    const result = await window.electronAPI?.installUpdate?.()
+    const result = await window.electronAPI?.installUpdate?.({ silent: silentInstall })
     if (result && !result.ok && result.error) {
       setState((prev) => ({ ...prev, installError: result.error ?? '启动安装器失败' }))
     }
@@ -99,7 +121,11 @@ export default function UpdateCard() {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent-green px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {state.installing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                {state.installing ? '正在启动安装…' : '下载完成，静默安装并重启'}
+                {state.installing
+                  ? '正在启动安装…'
+                  : silentInstall
+                    ? '下载完成，静默安装并重启'
+                    : '下载完成，打开安装向导'}
               </button>
             )}
             {state.download.status === 'error' && (
@@ -129,9 +155,37 @@ export default function UpdateCard() {
             <p>发布内容：{state.releaseName ?? '—'}</p>
             <p>文件：{state.asset.name}（{formatBytes(state.asset.size)}）</p>
             {state.publishedAt && <p>发布于：{state.publishedAt}</p>}
-            <p className="text-text-secondary">安装包下载完成前不会启用安装按钮；安装使用静默模式，完成后自动退出并重启应用。</p>
+            <p className="text-text-secondary">安装包下载完成前不会启用安装按钮。</p>
           </div>
         )}
+
+        {/* 静默安装开关：决定更新时是就地静默升级，还是弹向导让用户选安装位置 */}
+        <div className="flex items-start justify-between gap-3 rounded-lg bg-bg-tertiary/40 border border-bg-hover/50 px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-text-primary">静默安装</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+              {silentInstall
+                ? '更新时直接静默升级到当前安装位置，装完自动重启。'
+                : '更新时打开安装向导，可选择新的安装位置；换位置后配置与数据库仍保留在 AppData。'}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={silentInstall}
+            aria-label="静默安装"
+            onClick={toggleSilentInstall}
+            className={`relative mt-0.5 h-5 w-9 flex-shrink-0 rounded-full transition ${
+              silentInstall ? 'bg-accent-blue' : 'bg-bg-hover'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                silentInstall ? 'left-[18px]' : 'left-0.5'
+              }`}
+            />
+          </button>
+        </div>
       </div>
     </section>
   )

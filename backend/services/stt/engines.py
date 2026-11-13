@@ -4,10 +4,14 @@ import io
 import gzip
 import json
 import logging
+import os
+import shutil
 import struct
+import sys
 import time
 import uuid
 import wave
+from pathlib import Path
 import numpy as np
 import threading
 from typing import Optional, Any
@@ -535,6 +539,117 @@ class GenericHTTPSTT:
 # STTEngine – Whisper (local)
 # ---------------------------------------------------------------------------
 
+# The packaged desktop build bundles the default base model under
+# backend/assets/whisper-base (PyInstaller maps backend/assets -> assets), so
+# first use works with no network. Only sizes listed here may be loaded from
+# the bundle; other sizes still resolve through the normal HF cache/download.
+_BUNDLED_WHISPER_SIZES = ("base",)
+_BUNDLED_WHISPER_FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")
+
+
+def _bundled_whisper_model_dir() -> Path:
+    # engines.py is backend/services/stt/engines.py, so parents[2] is backend/.
+    return Path(__file__).resolve().parents[2] / "assets" / "whisper-base"
+
+
+def _bundled_model_path(model_size: str) -> Optional[Path]:
+    if model_size not in _BUNDLED_WHISPER_SIZES:
+        return None
+    bundled = _bundled_whisper_model_dir()
+    if bundled.is_dir():
+        return bundled
+    if getattr(sys, "frozen", False):
+        # Packaged builds must never silently fall back to a network download.
+        raise RuntimeError(
+            f"内置 Whisper 模型目录缺失（{bundled}）。请重新安装应用修复，或改用其他 STT 引擎。"
+        )
+    return None
+
+
+def _require_bundled_model_files(path: Path) -> None:
+    missing = [name for name in _BUNDLED_WHISPER_FILES if not (path / name).is_file()]
+    if missing:
+        raise RuntimeError(
+            f"内置 Whisper 模型文件不完整（{path}），缺少：{', '.join(missing)}。"
+            "请重新安装应用修复，或改用其他 STT 引擎。"
+        )
+
+
+def _looks_like_network_error(err: Exception) -> bool:
+    if isinstance(err, requests.exceptions.RequestException):
+        return True
+    message = str(err).lower()
+    return any(
+        token in message
+        for token in (
+            "connection", "network", "timeout", "timed out", "resolve",
+            "huggingface.co", "offline", "proxy", "ssl", "certificate",
+        )
+    )
+
+
+def _whisper_load_error(err: Exception, bundled: Optional[Path], model_size: str) -> str:
+    detail = str(err) or err.__class__.__name__
+    if bundled is not None:
+        return (
+            f"内置 Whisper 模型加载失败（{bundled}）：{detail}。"
+            "模型文件可能已损坏，请重新安装应用修复。"
+        )
+    if _looks_like_network_error(err):
+        return (
+            f"Whisper 模型 {model_size} 下载失败（网络问题）：{detail}。"
+            "请检查网络后重试，或改用其他 STT 引擎。"
+        )
+    return f"Whisper 模型加载失败（model={model_size}）：{detail}"
+
+
+# ---------------------------------------------------------------------------
+# 旧版本联网下载的 base 模型在内置之后成为冗余副本，升级后一次性清理
+# ---------------------------------------------------------------------------
+
+# 与 faster_whisper.utils._MODELS["base"] 对应；缓存目录名由 huggingface_hub 固定为
+# models--<owner>--<repo>。只清理 base：其他档位仍然依赖这个共享缓存。
+_SUPERSEDED_BASE_CACHE_DIR = "models--Systran--faster-whisper-base"
+_CACHE_PRUNE_MARKER = "whisper-bundled-migration.json"
+
+
+def _hf_cache_root() -> Path:
+    hub_cache_override = os.environ.get("HF_HUB_CACHE", "").strip()
+    if hub_cache_override:
+        return Path(hub_cache_override)
+    hf_home = os.environ.get("HF_HOME", "").strip()
+    if hf_home:
+        return Path(hf_home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _prune_superseded_whisper_cache(data_dir: str) -> None:
+    """删除旧版本下载的 base 缓存；只做一次，失败不影响启动。
+
+    内置模型优先于缓存被加载，所以这份缓存只是磁盘上的冗余副本。但用户可能对
+    small/medium/large-v3 仍有缓存需求，因此只动 base 这一个目录。
+    """
+    bundled = _bundled_model_path("base")
+    if bundled is None:
+        return
+    marker = Path(data_dir) / _CACHE_PRUNE_MARKER
+    if marker.is_file():
+        return
+    target = _hf_cache_root() / _SUPERSEDED_BASE_CACHE_DIR
+    if target.is_dir():
+        _log.info("Removing superseded downloaded whisper base cache: %s", target)
+        shutil.rmtree(target, ignore_errors=True)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps({"pruned": ["base"], "location": str(target)}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError:
+        # 记录失败就下次再试，不值得报错。
+        pass
+
+
 class STTEngine:
     """Speech-to-text engine using faster-whisper."""
 
@@ -568,13 +683,25 @@ class STTEngine:
                 return
             self._loading = True
             try:
-                from faster_whisper import WhisperModel
+                bundled = _bundled_model_path(self.model_size)
+                if bundled is not None:
+                    _require_bundled_model_files(bundled)
+                try:
+                    from faster_whisper import WhisperModel
+                except ImportError as e:
+                    raise RuntimeError(
+                        "缺少 faster-whisper 依赖，无法使用 Whisper 本地引擎。"
+                        "请运行 pip install faster-whisper，或重新安装应用修复。"
+                    ) from e
                 device, compute_type = self._best_device()
-                self._model = WhisperModel(
-                    self.model_size,
-                    device=device,
-                    compute_type=compute_type,
-                )
+                try:
+                    self._model = WhisperModel(
+                        str(bundled) if bundled is not None else self.model_size,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                except Exception as e:
+                    raise RuntimeError(_whisper_load_error(e, bundled, self.model_size)) from e
             finally:
                 self._loading = False
 

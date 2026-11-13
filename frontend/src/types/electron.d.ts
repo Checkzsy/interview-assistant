@@ -40,7 +40,7 @@ declare global {
       getUpdaterState?: () => Promise<UpdaterState>
       checkForUpdate?: () => Promise<UpdaterState>
       downloadUpdate?: () => Promise<UpdaterState>
-      installUpdate?: () => Promise<{ ok: boolean; error?: string }>
+      installUpdate?: (options?: { silent?: boolean }) => Promise<{ ok: boolean; error?: string }>
       onUpdaterState?: (callback: (state: UpdaterState) => void) => (() => void)
     }
   }

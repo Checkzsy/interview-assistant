@@ -75,3 +75,64 @@ describe('UpdateCard', () => {
     await waitFor(() => expect((window as any).electronAPI.downloadUpdate).toHaveBeenCalled())
   })
 })
+
+describe('UpdateCard install mode', () => {
+  const originalElectronAPI = window.electronAPI
+
+  beforeEach(() => {
+    delete (window as any).electronAPI
+    localStorage.clear()
+  })
+  afterEach(() => {
+    if (originalElectronAPI) (window as any).electronAPI = originalElectronAPI
+    else delete (window as any).electronAPI
+    localStorage.clear()
+  })
+
+  const setElectronAPI = () => {
+    const state = makeState({
+      download: { status: 'done', received: 1024, total: 1024, error: null, downloadedPath: 'C:/x.exe' },
+    })
+    const api = {
+      getUpdaterState: vi.fn(async () => state),
+      checkForUpdate: vi.fn(async () => state),
+      downloadUpdate: vi.fn(async () => state),
+      installUpdate: vi.fn(async () => ({ ok: true })),
+      onUpdaterState: () => () => {},
+    }
+    ;(window as any).electronAPI = api
+    return api
+  }
+
+  it('defaults to silent in-place upgrade', async () => {
+    const api = setElectronAPI()
+    render(<UpdateCard />)
+    const btn = await screen.findByRole('button', { name: /静默安装并重启/ })
+    fireEvent.click(btn)
+    await waitFor(() => expect(api.installUpdate).toHaveBeenCalledWith({ silent: true }))
+  })
+
+  it('switches to the guided installer when silent install is turned off', async () => {
+    const api = setElectronAPI()
+    render(<UpdateCard />)
+    const toggle = await screen.findByRole('switch', { name: /静默安装/ })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'))
+
+    const btn = await screen.findByRole('button', { name: /打开安装向导/ })
+    fireEvent.click(btn)
+    await waitFor(() => expect(api.installUpdate).toHaveBeenCalledWith({ silent: false }))
+    // 开关本机持久化，重启应用后仍生效。
+    expect(localStorage.getItem('ia_update_silent_install')).toBe('0')
+  })
+
+  it('remembers a previously disabled silent toggle across mounts', async () => {
+    localStorage.setItem('ia_update_silent_install', '0')
+    setElectronAPI()
+    render(<UpdateCard />)
+    const toggle = await screen.findByRole('switch', { name: /静默安装/ })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await screen.findByRole('button', { name: /打开安装向导/ })
+  })
+})

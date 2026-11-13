@@ -8,9 +8,11 @@ const STT_GUIDES: Record<string, { color: string; borderColor: string; title: st
     title: 'Whisper 本地引擎',
     steps: [
       '无需密钥，完全在本机运行',
-      '首次使用会自动下载模型（base ≈ 150MB）',
+      'Windows 安装包已内置 base 模型，选 base 可直接离线使用，无需下载',
+      '源码运行需先安装 faster-whisper 依赖（pip install faster-whisper）',
+      'small / medium 等其他模型不内置，首次使用会联网下载（需可访问 huggingface.co）',
       '模型越大越准但越慢，推荐 base 或 small',
-      '需确保 Python 环境已安装 faster-whisper',
+      '若提示内置模型文件缺失或损坏，请重新安装应用修复',
     ],
   },
   doubao: {

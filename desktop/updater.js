@@ -174,23 +174,40 @@ function downloadFile(url, destPath, { onProgress, expectedBytes = null, timeout
   });
 }
 
-/** 静默安装 NSIS 安装包；detached 让安装器独立于本进程生命周期。
- *  --force-run 是必需的重启开关：assisted installer（oneClick:false）只有在
- *  `${isForceRun} ${andIf} ${Silent}` 同时成立时才会拉起应用，仅传 /S 装完不会重启。
- *  --updated 让安装器把本次视为「升级安装」：在强杀进程前保留约 1.3s 的优雅退出宽限
- *  （allowOnlyOneInstallerInstance.nsh 的 ${if} ${isUpdated} Sleep 分支），给 /api/stop
- *  的复盘归档与 SQLite 刷盘留出时间，避免升级瞬间截断数据。这是 electron-updater 对
- *  静默更新采用的同款参数组合。
- *  spawnFn 可注入，便于测试断言实际参数。
+/**
+ * 安装包参数组合。两种模式互斥，各对应一种用户预期：
+ *
+ * silent（默认，设置页「静默安装」开启）：`/S --updated --force-run`
+ *  - `--updated` 让安装器把本次视为「升级安装」：NSIS 会从注册表 InstallLocation
+ *    读到现有安装目录并跳过目录选择页，也就是就地覆盖升级到用户已有的位置；
+ *    同时强杀进程前保留约 1.3s 优雅退出宽限（allowOnlyOneInstallerInstance.nsh
+ *    的 `${if} ${isUpdated} Sleep` 分支），给 /api/stop 的复盘归档与 SQLite 刷盘留时间。
+ *  - `--force-run` 是必需的重启开关：assisted installer（oneClick:false）只有在
+ *    `${isForceRun} ${andIf} ${Silent}` 同时成立时才会拉起应用，仅传 /S 装完不会重启。
+ *
+ * guided（设置页「静默安装」关闭）：不传任何参数，弹出安装向导
+ *  - 不能带 `/S`，否则 UI 被抑制；不能带 `--updated`，否则 skipPageIfUpdated 会跳过
+ *    目录选择页，「换安装位置」就无从选择；`--force-run` 也只在 /S 下生效，由用户
+ *    点「完成」启动即可。
+ *  - 向导默认目录同样来自注册表 InstallLocation（用户已有位置），改选新目录则先卸载
+ *    旧位置再装到新位置；用户数据在 AppData\%APPDATA%\<产品名>，与安装目录无关，
+ *    卸载器始终带 --updated 且未定义 DELETE_APP_DATA_ON_UNINSTALL，因此配置与
+ *    SQLite 数据库原地保留，无需复制。
+ *
+ * detached 让安装器独立于本进程生命周期；spawnFn 可注入，便于测试断言实际参数。
  */
-function launchInstaller(exePath, { spawnFn = spawn } = {}) {
+function installArgs({ silent = true } = {}) {
+  return silent ? ['/S', '--updated', '--force-run'] : [];
+}
+
+function launchInstaller(exePath, { spawnFn = spawn, silent = true } = {}) {
   return new Promise((resolve) => {
     try {
       if (!exePath || !fs.existsSync(exePath)) {
         resolve({ ok: false, error: 'installer not found' });
         return;
       }
-      const child = spawnFn(exePath, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+      const child = spawnFn(exePath, installArgs({ silent }), { detached: true, stdio: 'ignore', windowsHide: true });
       let settled = false;
       child.on('error', (err) => {
         if (settled) return;
@@ -216,5 +233,6 @@ module.exports = {
   pickAsset,
   checkForUpdate,
   downloadFile,
+  installArgs,
   launchInstaller,
 };
