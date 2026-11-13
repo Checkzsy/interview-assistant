@@ -71,3 +71,20 @@ test('preload exposes explicit content protection setter and capture capability 
   await api.getCaptureCapability();
   assert.equal(invoked[0], 'get-capture-capability');
 });
+
+test('preload installUpdate forwards the silent toggle to the main process', async () => {
+  invoked.length = 0;
+  const seen = [];
+  const original = fakeIpcRenderer.invoke;
+  fakeIpcRenderer.invoke = (channel, ...args) => {
+    seen.push({ channel, args });
+    return Promise.resolve({ ok: true });
+  };
+  try {
+    await api.installUpdate({ silent: false });
+    assert.strictEqual(seen[0].channel, 'updater:install');
+    assert.deepStrictEqual(seen[0].args, [{ silent: false }]);
+  } finally {
+    fakeIpcRenderer.invoke = original;
+  }
+});

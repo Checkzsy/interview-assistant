@@ -242,19 +242,26 @@ Windows workflow 会校验 tag 与 `desktop/package.json` 版本一致，在 `wi
 
 已安装的桌面版会在启动约 5 秒后检查 GitHub 最新稳定 Release。发现更高版本且 Release 含 `.exe` 时，应用只提示一次“发现新版本”桌面 Toast；同一版本重启不会重复提示。用户仍需打开设置页，在“检查更新”卡片中手动下载并确认安装，应用不会自动下载或静默安装。
 
-更新器下载完成后由 NSIS 以静默模式启动，并优雅退出旧应用。安装完成后用户重新启动应用即可；网络检查失败不会阻断正常启动。
+更新器下载完成后，按设置页「静默安装」开关决定安装方式，并优雅退出旧应用：
+
+- **开启（默认）**：以 `/S --updated --force-run` 静默升级到当前安装位置，装完自动重启。
+- **关闭**：弹出安装向导，可改选安装位置；装到新位置时先卸载旧位置再安装。
+
+两种方式下运行时数据都不受影响（见下节）。网络检查失败不会阻断正常启动。
 
 ### 安装覆盖与数据保留
 
-当前安装身份必须保持不变：`appId` 为 `com.interviewassistant.desktop`，`productName` 为 `Interview Assistant`，NSIS 为 `oneClick: false`、`perMachine: false`。在这些值不变且版本号递增时，新版 EXE 会按同一 per-user 安装身份升级原安装，而不是创建并存安装。
+当前安装身份必须保持不变：`appId` 为 `com.interviewassistant.desktop`，`productName` 为 `Interview Assistant`，NSIS 为 `oneClick: false`、`perMachine: false`。在这些值不变且版本号递增时，新版 EXE 会按同一 per-user 安装身份升级原安装，而不是创建并存安装。安装向导会从注册表 `InstallLocation` 读到已有安装目录并作为默认值，因此「同位置升级」是默认路径。
 
-运行时数据与配置（包括快捷键）写入 Electron `userData` 目录，不写入安装目录，因此升级应保留这些数据。首次发布或修改安装配置后，请按 [`docs/release/windows-upgrade-checklist.md`](docs/release/windows-upgrade-checklist.md) 在真实 Windows 环境验证覆盖安装和数据保留；静态测试不能替代该验证。
+运行时数据与配置（包括快捷键）写入 Electron `userData` 目录，不写入安装目录，因此升级和换安装位置都保留这些数据：卸载器始终带 `--updated`，且项目未定义 `DELETE_APP_DATA_ON_UNINSTALL`，`config.json` 与五个 SQLite 库不会随旧安装目录一起删除。首次发布或修改安装配置后，请按 [`docs/release/windows-upgrade-checklist.md`](docs/release/windows-upgrade-checklist.md) 在真实 Windows 环境验证覆盖安装和数据保留；静态测试不能替代该验证。
 
 ### 当前打包边界
 
 - 使用 electron-builder / NSIS，默认 per-user 安装。
 - Electron 壳、前端 `dist` 和后端可执行文件会进入安装包。
 - 安装包内置 PyInstaller 打好的独立后端 `resources/backend/backend.exe`，目标机器无需 Python。
+- 安装包同时内置 faster-whisper 的 `base` 模型（约 145MB，`resources/backend/_internal/assets/whisper-base`），首次使用 STT 无需联网；`small` / `medium` / `large-v3` 不内置，仍按需从 Hugging Face 下载。
+- 模型权重不入库：构建时由 `backend/scripts/bundle_whisper_base.py stage` 下载到 `backend/assets/whisper-base/`（已 gitignore），再由现有 `--add-data` 打进后端；打包后 workflow 会校验产物并做一次离线冒烟转写，缺模型直接失败，不会发布出只有壳的安装包。
 - 打包链会先执行 `npm run build:backend`（PyInstaller），再把产物放入 `resources/backend`。
 - 构建机需要安装后端依赖和 PyInstaller；脚本会排除与项目无关的重型依赖（torch/pandas/scipy 等）。
 - 安装包未做 Authenticode 签名，Windows SmartScreen 可能提示风险。
@@ -318,7 +325,7 @@ interview-assistant/
 - **双击 启动.bat 无反应**：确认双击后弹出的控制台内容；若提示找不到 python，请将 Python 加入 PATH 后重试。
 - **Electron 下载慢**：可先设置 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`，再进入 `desktop/` 执行 `npm install`。
 - **macOS 下 sounddevice 安装失败**：先执行 `brew install portaudio`。
-- **Whisper 模型下载慢**：可设置 `export HF_ENDPOINT=https://hf-mirror.com`。
+- **Whisper 模型下载慢**：`base` 已内置在安装包中，无需下载；只有在切换 `small` / `medium` / `large-v3` 时才需要联网，可设置 `export HF_ENDPOINT=https://hf-mirror.com`。
 - **端口冲突**：可改用 `python start.py --port 9090`。
 
 ## 开源协议与免责

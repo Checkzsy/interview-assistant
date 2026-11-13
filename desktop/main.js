@@ -1125,8 +1125,8 @@ function buildUpdateController() {
 ipcMain.handle('updater:get-state', () => (buildUpdateController() ).serialize());
 ipcMain.handle('updater:check', () => buildUpdateController().check());
 ipcMain.handle('updater:download', () => buildUpdateController().download());
-ipcMain.handle('updater:install', async () => {
-  const result = await buildUpdateController().install();
+ipcMain.handle('updater:install', async (_event, options) => {
+  const result = await buildUpdateController().install(options);
   return result;
 });
 

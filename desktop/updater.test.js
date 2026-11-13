@@ -177,3 +177,80 @@ test('launchInstaller surfaces a spawn failure as ok:false', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launchInstaller in silent mode passes /S --updated --force-run (in-place upgrade)', async () => {
+  const { EventEmitter } = require('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-installer-silent-'));
+  const exe = path.join(dir, 'Setup.exe');
+  fs.writeFileSync(exe, 'stub');
+  const captured = {};
+  const fakeSpawn = (command, args, options) => {
+    captured.args = args;
+    const child = new EventEmitter();
+    child.unref = () => {};
+    child.pid = 1;
+    setImmediate(() => child.emit('spawn'));
+    return child;
+  };
+  try {
+    const result = await launchInstaller(exe, { spawnFn: fakeSpawn, silent: true });
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(captured.args, ['/S', '--updated', '--force-run']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launchInstaller with the silent toggle off runs the guided wizard without --updated', async () => {
+  const { EventEmitter } = require('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-installer-guided-'));
+  const exe = path.join(dir, 'Setup.exe');
+  fs.writeFileSync(exe, 'stub');
+  const captured = { args: null, options: null };
+  const fakeSpawn = (command, args, options) => {
+    captured.args = args;
+    captured.options = options;
+    const child = new EventEmitter();
+    child.unref = () => {};
+    child.pid = 2;
+    setImmediate(() => child.emit('spawn'));
+    return child;
+  };
+  try {
+    const result = await launchInstaller(exe, { spawnFn: fakeSpawn, silent: false });
+    assert.strictEqual(result.ok, true);
+    // 不带 /S：安装向导必须可见，否则用户无法选择安装目录。
+    assert.ok(!captured.args.includes('/S'), '非静默模式不能被 /S 抑制 UI');
+    // 不带 --updated：installer 会跳过目录选择页（assistedInstaller.nsh skipPageIfUpdated），
+    // 那样「换安装位置」这个选项就被彻底堵死了。
+    assert.ok(!captured.args.includes('--updated'), '非静默模式必须保留目录选择页');
+    // 不带 --force-run：它要求 /S 同时成立才生效，向导模式下由用户点「完成」启动。
+    assert.ok(!captured.args.includes('--force-run'));
+    assert.strictEqual(captured.options.detached, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launchInstaller defaults to silent so existing callers keep upgrading in place', async () => {
+  const { EventEmitter } = require('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-installer-default-'));
+  const exe = path.join(dir, 'Setup.exe');
+  fs.writeFileSync(exe, 'stub');
+  let args = null;
+  const fakeSpawn = (command, a) => {
+    args = a;
+    const child = new EventEmitter();
+    child.unref = () => {};
+    child.pid = 3;
+    setImmediate(() => child.emit('spawn'));
+    return child;
+  };
+  try {
+    await launchInstaller(exe, { spawnFn: fakeSpawn });
+    assert.ok(args.includes('/S'));
+    assert.ok(args.includes('--updated'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

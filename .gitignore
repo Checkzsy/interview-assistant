@@ -54,6 +54,9 @@ backend/data/kb_cache/
 # Whisper / model cache
 *.bin
 *.pt
+# Bundled whisper-base model: staged at build time by
+# backend/scripts/bundle_whisper_base.py, never committed (see ^*.bin above).
+backend/assets/whisper-base/
 
 # OS
 .DS_Store

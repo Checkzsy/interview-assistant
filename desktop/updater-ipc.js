@@ -128,7 +128,8 @@ function createUpdateController({
     return serialize();
   }
 
-  async function install() {
+  async function install(options) {
+    const { silent = true } = options || {};
     const filePath = state.download.downloadedPath;
     if (state.download.status !== 'done' || !filePath || !fs.existsSync(filePath)) {
       state.installError = '安装包尚未就绪';
@@ -139,7 +140,7 @@ function createUpdateController({
     state.installing = true;
     state.installError = null;
     emit();
-    const result = await launchFn(filePath);
+    const result = await launchFn(filePath, { silent });
     if (!result.ok) {
       state.installing = false;
       state.installError = result.error || '启动安装器失败';

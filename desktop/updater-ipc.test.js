@@ -67,3 +67,51 @@ test('controller install refuses before download completes', async () => {
   assert.ok(r.error);
   ctl.dispose();
 });
+
+async function downloadedController(launchFn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-updipc-install-'));
+  const server = require('node:http').createServer((req, res) => {
+    const body = Buffer.from('installer-bytes');
+    res.writeHead(200, { 'Content-Length': body.length });
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const ctl = createUpdateController({
+    currentVersion: '1.1.0',
+    downloadsDir: dir,
+    apiUrl: 'https://api',
+    checkDelayMs: 0,
+    request: async () => makeReleaseBody('v1.2.0', [
+      { name: 'Interview.Assistant.Setup.1.2.0.exe', size: 15, url: `http://127.0.0.1:${port}/setup.exe` },
+    ]),
+    launchFn,
+  });
+  await ctl.check();
+  await ctl.download();
+  return { ctl, dir, server };
+}
+
+test('controller install passes the silent flag through to the installer', async () => {
+  const cases = [
+    { call: () => ({ silent: false }), expected: { silent: false } },
+    // 未显式传入时保持历史行为（静默就地升级）。
+    { call: () => undefined, expected: { silent: true } },
+  ];
+  for (const { call, expected } of cases) {
+    const calls = [];
+    const launchFn = async (filePath, options) => {
+      calls.push(options);
+      return { ok: true, pid: 1 };
+    };
+    const { ctl, dir, server } = await downloadedController(launchFn);
+    try {
+      await ctl.install(call());
+      assert.deepStrictEqual(calls[0], expected);
+    } finally {
+      ctl.dispose();
+      server.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
