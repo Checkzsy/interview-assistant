@@ -13,7 +13,7 @@ concurrency:
 jobs:
   # ── Detect what changed ─────────────────────────────────────
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -44,7 +44,7 @@ jobs:
   backend:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -83,7 +83,7 @@ jobs:
   frontend:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -123,7 +123,7 @@ jobs:
   desktop:
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: desktop
@@ -149,7 +149,7 @@ jobs:
   e2e-playwright:
     needs: [changes, frontend]
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -217,7 +217,7 @@ jobs:
   e2e-visual:
     needs: [changes, frontend]
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -276,7 +276,7 @@ jobs:
       needs.backend.result != 'cancelled' &&
       needs.frontend.result != 'failure' &&
       needs.frontend.result != 'cancelled'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -329,7 +329,7 @@ jobs:
   ci-gate:
     needs: [backend, frontend, desktop, e2e-playwright, e2e-smoke, e2e-visual]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check all required jobs succeeded or were skipped
         run: |
