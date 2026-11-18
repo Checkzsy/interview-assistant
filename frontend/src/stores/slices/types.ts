@@ -162,6 +162,8 @@ export interface OptionsInfo {
   languages: string[]
   stt_providers?: string[]
   whisper_models: string[]
+  /** Models shipped inside the installer, usable offline without downloading. */
+  bundled_whisper_models?: string[]
   screen_capture_regions?: string[]
 }
 

@@ -20,6 +20,7 @@ from core.env import env_int
 from services.audio import AudioCapture
 from services.stt import get_stt_engine
 from services.stt.engines import STTEngine
+from services.stt.model_files import bundled_model_sizes
 from services.stt.factory import (
     WhisperInferenceBusy,
     get_preparation_snapshot,
@@ -514,6 +515,7 @@ async def api_options():
         "languages": LANGUAGE_OPTIONS,
         "stt_providers": STT_PROVIDER_OPTIONS,
         "whisper_models": WHISPER_MODEL_OPTIONS,
+        "bundled_whisper_models": bundled_model_sizes(),
         "screen_capture_regions": SCREEN_CAPTURE_REGION_OPTIONS,
     }
 

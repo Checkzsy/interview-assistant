@@ -69,7 +69,7 @@ describe('SettingsDrawer', () => {
 
     render(<SettingsDrawer />)
 
-    const modelSelect = await screen.findByDisplayValue('base')
+    const modelSelect = await screen.findByTestId('main-whisper-model')
     modelSelect.focus()
     fireEvent.change(modelSelect, { target: { value: 'tiny' } })
 
@@ -90,7 +90,7 @@ describe('SettingsDrawer', () => {
 
     render(<SettingsDrawer />)
 
-    const modelSelect = await screen.findByDisplayValue('base')
+    const modelSelect = await screen.findByTestId('main-whisper-model')
     fireEvent.change(modelSelect, { target: { value: 'tiny' } })
     await waitFor(() => {
       expect(screen.getAllByText('有未保存更改').length).toBeGreaterThan(0)
@@ -111,7 +111,7 @@ describe('SettingsDrawer', () => {
   it('asks before switching tabs with unsaved explicit settings', async () => {
     render(<SettingsDrawer />)
 
-    const modelSelect = await screen.findByDisplayValue('base')
+    const modelSelect = await screen.findByTestId('main-whisper-model')
     fireEvent.change(modelSelect, { target: { value: 'tiny' } })
     await waitFor(() => {
       expect(screen.getAllByText('有未保存更改').length).toBeGreaterThan(0)
@@ -132,7 +132,7 @@ describe('SettingsDrawer', () => {
   it('shows explicit unsaved sections in the drawer header', async () => {
     render(<SettingsDrawer />)
 
-    const modelSelect = await screen.findByDisplayValue('base')
+    const modelSelect = await screen.findByTestId('main-whisper-model')
     fireEvent.change(modelSelect, { target: { value: 'tiny' } })
 
     expect(await screen.findByText('未保存：语音配置')).toBeInTheDocument()

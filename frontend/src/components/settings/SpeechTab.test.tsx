@@ -108,6 +108,35 @@ describe('SpeechTab', () => {
     expect(screen.getByText(/请切换到“通用 ASR”或“Whisper”/)).toBeInTheDocument()
   })
 
+  it('marks which whisper models ship inside the installer', () => {
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper' },
+    }) as any)
+    render(<SpeechTab />)
+
+    const options = Array.from(
+      (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
+    ).map((option) => option.textContent)
+
+    expect(options).toContain('base · 需下载 (约 145 MB)')
+    expect(options).toContain('tiny · 需下载 (约 75 MB)')
+  })
+
+  it('labels bundled models as offline-ready when the backend reports them', () => {
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper' },
+      options: { ...(state.options as any), bundled_whisper_models: ['base'] },
+    }) as any)
+    render(<SpeechTab />)
+
+    const options = Array.from(
+      (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
+    ).map((option) => option.textContent)
+
+    expect(options).toContain('base · 已内置，离线可用 (约 145 MB)')
+    expect(options).toContain('tiny · 需下载 (约 75 MB)')
+  })
+
   it('shows candidate microphone ASR defaults as local whisper', () => {
     render(<SpeechTab />)
 
@@ -252,7 +281,7 @@ describe('SpeechTab', () => {
     }) as any)
     render(<SpeechTab />)
 
-    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+    fireEvent.change(screen.getByTestId('main-whisper-model'), { target: { value: 'tiny' } })
 
     expect(screen.getAllByText('有未保存更改').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByText('保存语音配置'))
@@ -294,7 +323,7 @@ describe('SpeechTab', () => {
     }) as any)
     render(<SpeechTab />)
 
-    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+    fireEvent.change(screen.getByTestId('main-whisper-model'), { target: { value: 'tiny' } })
     useInterviewStore.setState((state) => ({
       config: {
         ...(state.config as any),
@@ -302,7 +331,7 @@ describe('SpeechTab', () => {
       },
     }) as any)
 
-    expect(screen.getByDisplayValue('tiny')).toBeInTheDocument()
+    expect((screen.getByTestId('main-whisper-model') as HTMLSelectElement).value).toBe('tiny')
     expect(screen.getAllByText('有未保存更改').length).toBeGreaterThan(0)
   })
 
@@ -360,14 +389,14 @@ describe('SpeechTab', () => {
     render(<SpeechTab />)
 
     fireEvent.click(screen.getByText('保存并测试'))
-    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+    fireEvent.change(screen.getByTestId('main-whisper-model'), { target: { value: 'tiny' } })
 
     await act(async () => {
       save.resolve({ ok: true, stt_config_version: 'v-2' })
       await save.promise
     })
 
-    expect(screen.getByDisplayValue('tiny')).toBeInTheDocument()
+    expect((screen.getByTestId('main-whisper-model') as HTMLSelectElement).value).toBe('tiny')
     expect(apiMock.sttTest).not.toHaveBeenCalled()
   })
 
@@ -383,7 +412,7 @@ describe('SpeechTab', () => {
     fireEvent.click(screen.getByText('保存并测试'))
     await waitFor(() => expect(apiMock.sttTest).toHaveBeenCalledTimes(1))
 
-    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+    fireEvent.change(screen.getByTestId('main-whisper-model'), { target: { value: 'tiny' } })
 
     await act(async () => {
       stt.resolve({ ok: true, text: 'hello' })

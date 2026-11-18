@@ -281,6 +281,10 @@ def test_late_candidate_asr_cannot_publish_or_stop_new_capture(monkeypatch):
     monkeypatch.setattr(audio, "drain_audio_chunks", lambda **kwargs: [chunks.pop()] if chunks else [])
     monkeypatch.setattr(pipeline, "_publish_candidate_transcription", lambda *args, **kwargs: published.append(args))
 
+    # 必须显式给出配置：真实 config.json 在开发者机器上可能开着候选人 ASR,
+    # CI 上没有该文件则默认关闭, worker 会每轮 continue 而永远到不了转写。
+    monkeypatch.setattr(pipeline, "get_config", lambda: _candidate_cfg())
+
     def transcribe(*args, **kwargs):
         entered_infer.set()
         assert release_infer.wait(timeout=2)
@@ -1185,6 +1189,26 @@ def test_worker_drains_remaining_raw_audio_after_stop_before_tail_flush(monkeypa
 
     assert drained_after_stop["done"] is True
     assert published == ["停止前最后一句"]
+
+
+def _candidate_cfg(**overrides):
+    """候选人 worker 测试用的显式配置，避免读取开发者本地 config.json。"""
+    base = {
+        "candidate_asr_enabled": True,
+        "candidate_stt_provider": "whisper",
+        "candidate_remote_stt_enabled": False,
+        "candidate_whisper_model": "base",
+        "candidate_whisper_language": "zh",
+        "candidate_streaming_asr_enabled": False,
+        "candidate_streaming_asr_interval_ms": 1500,
+        "silence_threshold": 0.01,
+        "silence_duration": 1.2,
+        "position": "",
+        "language": "zh",
+        "transcription_min_sig_chars": 1,
+    }
+    base.update(overrides)
+    return type("Cfg", (), base)()
 
 
 def _wire_candidate_fakes(monkeypatch, audio_capture, session):

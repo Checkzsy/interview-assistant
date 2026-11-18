@@ -97,6 +97,18 @@ def _require_bundled_model_files(path: Path) -> dict[str, int]:
         raise RuntimeError(f"内置 Whisper 模型文件损坏（{path}）：{error}。请重新安装应用修复。") from error
 
 
+def bundled_model_sizes() -> list[str]:
+    """安装包已内置的模型名，供 UI 标注，避免用户分不清哪个要下载。
+
+    只认实际存在的完整内置目录；目录不完整时不上报，避免界面声称离线可用
+    而实际加载失败。
+    """
+    bundled = _bundled_whisper_model_dir()
+    complete = all((bundled / name).is_file() for name in _BUNDLED_WHISPER_FILES)
+    return ["base"] if bundled.is_dir() and complete else []
+
+
+
 def _cached_directory(repo_id: str, cache_dir: Path) -> Path | None:
     from huggingface_hub import scan_cache_dir, snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError

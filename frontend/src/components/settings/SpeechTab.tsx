@@ -31,6 +31,7 @@ import {
   type SaveState,
 } from './shared'
 import SttGuideCard from './SttGuideCard'
+import { whisperModelOptionLabel } from './whisperModelOptions'
 
 function clampNumberInput(value: unknown, min: number, max: number, fallback: number): number {
   const parsed = Number(value)
@@ -877,10 +878,10 @@ export default function SpeechTab() {
 
         {form.stt_provider === 'whisper' && (
           <>
-            <Field label="Whisper 模型" hint="模型越大越准确但越慢，base 适合大多数场景">
-              <select value={form.whisper_model} onChange={(e) => setForm({ ...form, whisper_model: e.target.value })} className="input-field">
+            <Field label="Whisper 模型" hint="模型越大越准确但越慢。已内置的模型无需联网，其余模型首次使用会先下载">
+              <select data-testid="main-whisper-model" value={form.whisper_model} onChange={(e) => setForm({ ...form, whisper_model: e.target.value })} className="input-field">
                 {(options?.whisper_models ?? ['tiny', 'base', 'small', 'medium', 'large-v3']).map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>{whisperModelOptionLabel(m, options?.bundled_whisper_models)}</option>
                 ))}
               </select>
             </Field>
@@ -1152,7 +1153,7 @@ export default function SpeechTab() {
                   >
                     <option value="">沿用主配置 ({form.whisper_model})</option>
                     {(options?.whisper_models ?? ['tiny', 'base', 'small', 'medium', 'large-v3']).map((m) => (
-                      <option key={m} value={m}>{m}</option>
+                      <option key={m} value={m}>{whisperModelOptionLabel(m, options?.bundled_whisper_models)}</option>
                     ))}
                   </select>
                 </Field>
