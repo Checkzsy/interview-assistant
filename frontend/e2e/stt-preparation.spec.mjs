@@ -431,6 +431,11 @@ test.describe('STT switch: saved small -> medium preparation', () => {
     await openSpeechSettings(page)
     await page.getByRole('button', { name: '保存并测试' }).click()
     await expect(page.getByTestId('stt-preparation-status').getByText('正在下载模型 30%')).toBeVisible({ timeout: 10_000 })
+    // The 30% state is already visible from the status snapshot, so the check
+    // above can pass before the save+test POST lands. Wait for it explicitly;
+    // otherwise editing the selection first would retire the operation before
+    // it ever posted and the final count would be 0 by construction.
+    await expect.poll(() => calls.test).toBe(1)
 
     // The user moves on while the medium target is still preparing.
     await modelSelect(page).selectOption('small')

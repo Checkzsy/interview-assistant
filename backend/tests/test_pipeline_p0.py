@@ -291,7 +291,9 @@ def test_late_candidate_asr_cannot_publish_or_stop_new_capture(monkeypatch):
     group = pipeline._current_recording_group()
     worker = threading.Thread(target=pipeline._candidate_worker, args=(group,), daemon=True)
     worker.start()
-    assert entered_infer.wait(timeout=1)
+    # CI workers are slow to schedule the fresh thread; a 1s window flakes even
+    # though the worker always reaches the blocked transcribe call.
+    assert entered_infer.wait(timeout=5)
     group.stop_event.set()
     group.accept_results = False
     new_group = pipeline._RecordingGroup()
