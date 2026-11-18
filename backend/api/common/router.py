@@ -20,7 +20,7 @@ from core.env import env_int
 from services.audio import AudioCapture
 from services.stt import get_stt_engine
 from services.stt.engines import STTEngine
-from services.stt.model_files import bundled_model_sizes
+from services.stt.model_files import bundled_model_sizes, whisper_model_states
 from services.stt.factory import (
     WhisperInferenceBusy,
     get_preparation_snapshot,
@@ -506,6 +506,16 @@ async def api_network_info(request: Request):
         "url": url,
         "auth_required": auth_required,
     }
+
+
+@router.get("/stt/models")
+async def api_stt_models():
+    """每个 Whisper 模型在磁盘上的真实状态与路径。
+
+    下载/删除都发生在磁盘上，所以这里每次按当前文件系统重新计算，
+    不做缓存——否则用户删掉模型后界面仍会显示“已下载”。
+    """
+    return await run_in_threadpool(lambda: {"models": whisper_model_states(WHISPER_MODEL_OPTIONS)})
 
 
 @router.get("/options")

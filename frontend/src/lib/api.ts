@@ -43,6 +43,16 @@ export interface SttStatusPayload {
   detail?: string
 }
 
+/** Where a Whisper model lives right now, as reported by the backend. */
+export interface SttModelState {
+  model: string
+  /** bundled = shipped in the installer, downloaded = ready in cache, missing = not present */
+  status: 'bundled' | 'downloaded' | 'missing'
+  path: string
+  /** Bundled files sit inside the install directory; deleting them breaks the app. */
+  deletable: boolean
+}
+
 export interface SttTestResult {
   ok: boolean
   detail?: string
@@ -428,6 +438,8 @@ export const api = {
       method: 'POST',
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     }),
+  /** On-disk state of each Whisper model (bundled / downloaded / missing). */
+  sttModels: () => request<{ models: SttModelState[] }>('/api/stt/models'),
 
   // Knowledge
   knowledgeSummary: () => request('/api/knowledge/summary'),

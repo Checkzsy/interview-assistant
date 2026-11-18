@@ -539,3 +539,26 @@ def test_hf_home_overrides_default_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf-home"))
     directory = _snapshot(tmp_path / "hf-home" / "hub", REPOS["tiny"])
     assert model_files.prepare_model_files("tiny") == directory
+
+
+def test_deleting_a_downloaded_model_returns_it_to_missing_and_redownloads(isolated_hub, monkeypatch):
+    """用户手动删除模型文件后，状态必须回到“需下载”，下次使用再次下载。"""
+    import shutil
+
+    hub = _HubBoundary(isolated_hub).install(monkeypatch)
+    model_files.prepare_model_files("medium")
+    states = {item["model"]: item for item in model_files.whisper_model_states(["medium"])}
+    assert states["medium"]["status"] == "downloaded"
+    assert states["medium"]["deletable"] is True
+
+    storage = Path(states["medium"]["path"])
+    # Deleting this directory must be enough — it is the repo dir owning blobs/.
+    assert storage.name == "models--Systran--faster-whisper-medium"
+    shutil.rmtree(storage)
+    deleted = {item["model"]: item for item in model_files.whisper_model_states(["medium"])}
+    assert deleted["medium"]["status"] == "missing"
+
+    hub.info_calls.clear()
+    hub.download_calls.clear()
+    model_files.prepare_model_files("medium")
+    assert hub.online_calls, "删除后的模型必须重新下载"

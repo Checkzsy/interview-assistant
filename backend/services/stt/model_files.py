@@ -108,6 +108,65 @@ def bundled_model_sizes() -> list[str]:
     return ["base"] if bundled.is_dir() and complete else []
 
 
+def _model_storage_dir(snapshot: Path) -> Path:
+    """The directory a user should delete to reclaim the whole model.
+
+    `snapshot` is `.../models--Systran--faster-whisper-{size}/snapshots/<sha>`.
+    The bulky weights live in sibling `blobs/`, so pointing at the snapshot
+    alone would free nothing — expose the repo directory that owns both.
+    """
+    if snapshot.parent.name == "snapshots" and snapshot.parent.parent.name.startswith("models--"):
+        return snapshot.parent.parent
+    return snapshot
+
+
+def whisper_model_states(model_sizes) -> list[dict]:
+    """每个模型在磁盘上的真实状态，供设置页展示路径与下载状态。
+
+    status:
+      - bundled    安装包自带，删除会破坏安装，不可由用户删除
+      - downloaded 已完整下载到 HF 缓存，可删除
+      - missing    尚未下载；path 给出下载落点便于用户事后查找
+    """
+    bundled_dir = _bundled_whisper_model_dir()
+    cache_dir = _hf_cache_root()
+    states = []
+    for model_size in model_sizes:
+        bundled = bundled_dir if model_size == "base" else None
+        if bundled is not None and bundled.is_dir() and all(
+            (bundled / name).is_file() for name in _BUNDLED_WHISPER_FILES
+        ):
+            states.append({
+                "model": model_size,
+                "status": "bundled",
+                "path": str(bundled.resolve()),
+                "deletable": False,
+            })
+            continue
+        repo_id = _MODEL_REPOSITORIES.get(model_size)
+        cached = _cached_directory(repo_id, cache_dir) if repo_id else None
+        if cached is not None:
+            try:
+                _verify_directory(cached)
+            except RuntimeError:
+                cached = None
+        if cached is not None:
+            states.append({
+                "model": model_size,
+                "status": "downloaded",
+                "path": str(_model_storage_dir(cached)),
+                "deletable": True,
+            })
+            continue
+        states.append({
+            "model": model_size,
+            "status": "missing",
+            "path": str(cache_dir.resolve()),
+            "deletable": False,
+        })
+    return states
+
+
 
 def _cached_directory(repo_id: str, cache_dir: Path) -> Path | None:
     from huggingface_hub import scan_cache_dir, snapshot_download

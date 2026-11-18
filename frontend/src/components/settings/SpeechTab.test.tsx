@@ -8,6 +8,7 @@ import { useInterviewStore } from '@/stores/configStore'
 const apiMock = vi.hoisted(() => ({
   sttTest: vi.fn(),
   getSttStatus: vi.fn(),
+  sttModels: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -37,6 +38,13 @@ beforeEach(() => {
     }))
     apiMock.sttTest.mockReset()
     apiMock.sttTest.mockResolvedValue({ ok: true, text: 'demo' })
+    apiMock.sttModels.mockReset()
+    apiMock.sttModels.mockResolvedValue({
+      models: [
+        { model: 'base', status: 'bundled', path: 'C:/app/assets/whisper-base', deletable: false },
+        { model: 'tiny', status: 'missing', path: 'C:/cache/hf', deletable: false },
+      ],
+    })
     apiMock.getSttStatus.mockReset()
     apiMock.getSttStatus.mockResolvedValue({
       loaded: false,
@@ -108,33 +116,81 @@ describe('SpeechTab', () => {
     expect(screen.getByText(/请切换到“通用 ASR”或“Whisper”/)).toBeInTheDocument()
   })
 
-  it('marks which whisper models ship inside the installer', () => {
+  it('marks which whisper models ship inside the installer', async () => {
     useInterviewStore.setState((state) => ({
       config: { ...(state.config as any), stt_provider: 'whisper' },
     }) as any)
     render(<SpeechTab />)
 
-    const options = Array.from(
-      (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
-    ).map((option) => option.textContent)
-
-    expect(options).toContain('base · 需下载 (约 145 MB)')
-    expect(options).toContain('tiny · 需下载 (约 75 MB)')
+    await waitFor(() => {
+      const options = Array.from(
+        (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
+      ).map((option) => option.textContent)
+      expect(options).toContain('base · 已内置，离线可用 (约 145 MB)')
+      expect(options).toContain('tiny · 需下载 (约 75 MB)')
+    })
   })
 
-  it('labels bundled models as offline-ready when the backend reports them', () => {
+  it('labels bundled models as offline-ready when the backend reports them', async () => {
     useInterviewStore.setState((state) => ({
       config: { ...(state.config as any), stt_provider: 'whisper' },
       options: { ...(state.options as any), bundled_whisper_models: ['base'] },
     }) as any)
     render(<SpeechTab />)
 
-    const options = Array.from(
-      (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
-    ).map((option) => option.textContent)
+    await waitFor(() => {
+      const options = Array.from(
+        (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
+      ).map((option) => option.textContent)
+      expect(options).toContain('base · 已内置，离线可用 (约 145 MB)')
+    })
+  })
 
-    expect(options).toContain('base · 已内置，离线可用 (约 145 MB)')
-    expect(options).toContain('tiny · 需下载 (约 75 MB)')
+  it('shows the on-disk path so the user can delete a downloaded model', async () => {
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper', whisper_model: 'medium' },
+    }) as any)
+    apiMock.sttModels.mockResolvedValue({
+      models: [
+        { model: 'medium', status: 'downloaded', path: 'C:/cache/hf/medium', deletable: true },
+      ],
+    })
+    render(<SpeechTab />)
+
+    const path = await screen.findByTestId('whisper-model-path')
+    expect(path).toHaveTextContent('已下载到：C:/cache/hf/medium')
+    expect(path).toHaveTextContent('删除后再次选择该模型会重新下载')
+  })
+
+  it('goes back to “需下载” after the user deletes the model and returns', async () => {
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper', whisper_model: 'medium' },
+      options: { ...(state.options as any), whisper_models: ['tiny', 'base', 'medium'] },
+    }) as any)
+    apiMock.sttModels.mockResolvedValueOnce({
+      models: [
+        { model: 'medium', status: 'downloaded', path: 'C:/cache/hf/medium', deletable: true },
+      ],
+    })
+    render(<SpeechTab />)
+    await screen.findByTestId('whisper-model-path')
+
+    // The user deletes the folder in Explorer; returning focus to the window
+    // must re-read the disk rather than keep the stale "已下载" label.
+    apiMock.sttModels.mockResolvedValue({
+      models: [{ model: 'medium', status: 'missing', path: 'C:/cache/hf', deletable: false }],
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+    })
+
+    await waitFor(() => {
+      const options = Array.from(
+        (screen.getByTestId('main-whisper-model') as HTMLSelectElement).options,
+      ).map((option) => option.textContent)
+      expect(options).toContain('medium · 需下载 (约 1.5 GB)')
+    })
+    expect(screen.getByTestId('whisper-model-path')).toHaveTextContent('下载后会保存到：C:/cache/hf')
   })
 
   it('shows candidate microphone ASR defaults as local whisper', () => {

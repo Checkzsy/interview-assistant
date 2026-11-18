@@ -31,7 +31,7 @@ import {
   type SaveState,
 } from './shared'
 import SttGuideCard from './SttGuideCard'
-import { whisperModelOptionLabel } from './whisperModelOptions'
+import { whisperModelOptionLabel, whisperModelPathHint, type WhisperModelState } from './whisperModelOptions'
 
 function clampNumberInput(value: unknown, min: number, max: number, fallback: number): number {
   const parsed = Number(value)
@@ -206,6 +206,7 @@ export default function SpeechTab() {
   const [sttTestResult, setSttTestResult] = useState<{ ok: boolean; detail?: string; text?: string } | null>(null)
   const [localOpView, setLocalOpView] = useState<SttLocalOp | null>(null)
   const [stalled, setStalled] = useState(false)
+  const [modelStates, setModelStates] = useState<WhisperModelState[] | null>(null)
   const savingRef = useRef(false)
   const sttTestingRef = useRef(false)
   const mountedRef = useRef(true)
@@ -298,6 +299,36 @@ export default function SpeechTab() {
       pollInFlightRef.current = false
     }
   }, [])
+
+  const refreshModelStates = useCallback(async () => {
+    try {
+      const result = await api.sttModels()
+      if (!mountedRef.current) return
+      setModelStates(result?.models ?? [])
+    } catch {
+      // Best-effort: keep whatever we last knew rather than showing a wrong
+      // "需下载" for a model the user already has.
+    }
+  }, [])
+
+  // Re-read on-disk state whenever a preparation attempt reaches a terminal
+  // phase. That is exactly when the files land (or a download fails), and it
+  // is also how a manual deletion gets picked up on the next status poll.
+  const terminalPrepSignature = (sttPreparation as SttPrepSnapshot | null)?.states
+    ?.filter((state) => state.phase === 'ready' || state.phase === 'error')
+    .map((state) => `${state.key.join('/')}:${state.phase}:${state.attempt_id}`)
+    .join('|') ?? ''
+
+  useEffect(() => {
+    void refreshModelStates()
+  }, [refreshModelStates, terminalPrepSignature])
+
+  // The user deletes model files in Explorer and comes straight back. Re-read
+  // on focus so a stale "已下载" cannot survive the round trip.
+  useEffect(() => {
+    window.addEventListener('focus', refreshModelStates)
+    return () => window.removeEventListener('focus', refreshModelStates)
+  }, [refreshModelStates])
 
   const runActualTest = useCallback(async (opId: number) => {
     const op = opRef.current
@@ -881,9 +912,14 @@ export default function SpeechTab() {
             <Field label="Whisper 模型" hint="模型越大越准确但越慢。已内置的模型无需联网，其余模型首次使用会先下载">
               <select data-testid="main-whisper-model" value={form.whisper_model} onChange={(e) => setForm({ ...form, whisper_model: e.target.value })} className="input-field">
                 {(options?.whisper_models ?? ['tiny', 'base', 'small', 'medium', 'large-v3']).map((m) => (
-                  <option key={m} value={m}>{whisperModelOptionLabel(m, options?.bundled_whisper_models)}</option>
+                  <option key={m} value={m}>{whisperModelOptionLabel(m, modelStates, options?.bundled_whisper_models)}</option>
                 ))}
               </select>
+              {whisperModelPathHint(form.whisper_model, modelStates) && (
+                <p data-testid="whisper-model-path" className="text-[10px] text-text-muted break-all leading-relaxed">
+                  {whisperModelPathHint(form.whisper_model, modelStates)}
+                </p>
+              )}
             </Field>
             <Field label="识别语言" hint="auto = 自动检测（推荐），适合中英混合面试">
               <select value={form.whisper_language} onChange={(e) => setForm({ ...form, whisper_language: e.target.value })} className="input-field">
@@ -1153,7 +1189,7 @@ export default function SpeechTab() {
                   >
                     <option value="">沿用主配置 ({form.whisper_model})</option>
                     {(options?.whisper_models ?? ['tiny', 'base', 'small', 'medium', 'large-v3']).map((m) => (
-                      <option key={m} value={m}>{whisperModelOptionLabel(m, options?.bundled_whisper_models)}</option>
+                      <option key={m} value={m}>{whisperModelOptionLabel(m, modelStates, options?.bundled_whisper_models)}</option>
                     ))}
                   </select>
                 </Field>

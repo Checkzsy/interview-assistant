@@ -730,6 +730,16 @@ export function resolveApiPayload(pathname, method) {
   if (pathname === '/api/devices') return SAMPLE_DEVICES
   if (pathname === '/api/network-info') return { ip: '127.0.0.1', port: 18999 }
   if (pathname === '/api/stt/status') return { loaded: true, loading: false }
+  if (pathname === '/api/stt/models') {
+    return {
+      models: SAMPLE_OPTIONS.whisper_models.map((model) => ({
+        model,
+        status: 'missing',
+        path: '/home/runner/.cache/huggingface/hub',
+        deletable: false,
+      })),
+    }
+  }
   if (pathname === '/api/session') return { session_id: 'mock-session', started_at: now() }
   if (pathname === '/api/clear') return { ok: true }
   if (pathname === '/api/ask/cancel') return { ok: true, cancelled: 0 }
