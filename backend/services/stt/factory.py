@@ -2,6 +2,8 @@
 
 import time
 import threading
+import uuid
+from copy import deepcopy
 from typing import Optional
 
 import numpy as np
@@ -19,6 +21,271 @@ _engine_lock = threading.Lock()
 _whisper_infer_lock = threading.Lock()
 REMOTE_EMPTY_RETRY_PAD_MS = 240
 REMOTE_EMPTY_RETRY_MAX_AUDIO_SEC = 6.0
+
+_preparation_condition = threading.Condition()
+_preparation_runtime = None
+_preparation_revision = 0
+_preparation_callback = None
+_preparation_active = None
+_preparation_pending = []
+_preparation_states = {}
+_preparation_consumers = {}
+_PREPARATION_PROGRESS_MIN_INTERVAL = 0.25
+_LAST_PREPARATION_EMIT = object()
+
+
+def _preparation_key(model_size=None, language=None):
+    if model_size is None or language is None:
+        from core.config import get_config
+        cfg = get_config()
+        model_size = model_size or cfg.whisper_model or "base"
+        language = language or cfg.whisper_language or "auto"
+    return model_size, language
+
+
+def _new_preparation_state(key, phase):
+    now = time.time()
+    return {
+        "key": list(key), "attempt_id": uuid.uuid4().hex, "phase": phase,
+        "downloaded_bytes": None, "total_bytes": None, "progress": None,
+        "started_at": None, "updated_at": now, "error": None, "roles": [],
+        _LAST_PREPARATION_EMIT: None,
+    }
+
+
+def _public_preparation_state(state):
+    return deepcopy({key: value for key, value in state.items() if key is not _LAST_PREPARATION_EMIT})
+
+
+def _preparation_event_locked(state):
+    global _preparation_revision
+    _preparation_revision += 1
+    state["updated_at"] = time.time()
+    state[_LAST_PREPARATION_EMIT] = time.monotonic()
+    event = _public_preparation_state(state)
+    event.update(runtime_id=_preparation_runtime, revision=_preparation_revision)
+    return event
+
+
+def _emit_preparation(event):
+    with _preparation_condition:
+        callback = _preparation_callback
+        valid = _preparation_runtime == event["runtime_id"] and _preparation_runtime is not None
+    if not valid:
+        return
+    if callback is not None:
+        try:
+            callback(event)
+        except Exception:
+            _log.exception("Whisper preparation callback failed")
+
+
+def _refresh_preparation_roles_locked():
+    for key, state in _preparation_states.items():
+        state["roles"] = sorted(role for role, selected in _preparation_consumers.items() if selected == key)
+    _preparation_pending[:] = [
+        key for key in _preparation_pending if _preparation_states[key]["roles"]
+    ]
+
+
+def init_preparation_lane(callback=None):
+    global _preparation_runtime, _preparation_callback, _preparation_revision
+    with _preparation_condition:
+        if _preparation_runtime is not None:
+            _preparation_callback = callback
+            return
+        _preparation_runtime = uuid.uuid4().hex
+        _preparation_revision = 0
+        _preparation_callback = callback
+        runtime = _preparation_runtime
+        thread = threading.Thread(
+            target=_preparation_worker, args=(runtime,), name="stt-prepare", daemon=True,
+        )
+        thread.start()
+
+
+def shutdown_preparation_lane():
+    global _preparation_runtime, _preparation_callback, _preparation_active, _preparation_revision, _whisper_preload_done, _engine
+    with _preparation_condition:
+        _preparation_runtime = None
+        _preparation_revision = 0
+        _preparation_callback = None
+        _preparation_active = None
+        _preparation_pending.clear()
+        _preparation_states.clear()
+        _preparation_consumers.clear()
+        _preparation_condition.notify_all()
+    with _engine_lock:
+        engines = list(_whisper_engines.values())
+        if _engine is not None and _engine not in engines:
+            engines.append(_engine)
+        _whisper_engines.clear()
+        _engine = None
+        _whisper_preload_done = False
+    for engine in engines:
+        engine.close()
+
+
+def request_prepare(model_size=None, language=None, *, consumer="main", retry=False):
+    if consumer not in {"main", "candidate", "fallback"}:
+        raise ValueError("Unknown preparation consumer: " + str(consumer))
+    key = _preparation_key(model_size, language)
+    events = []
+    with _preparation_condition:
+        if _preparation_runtime is None:
+            state = _new_preparation_state(key, "uninitialized")
+            state["error"] = "Whisper preparation lane is not initialized"
+            return _public_preparation_state(state)
+        _preparation_consumers[consumer] = key
+        before = {item: list(value["roles"]) for item, value in _preparation_states.items()}
+        created = False
+        state = _preparation_states.get(key)
+        if state is None or (retry and state["phase"] == "error"):
+            state = _new_preparation_state(key, "queued")
+            _preparation_states[key] = state
+            created = True
+        _refresh_preparation_roles_locked()
+        if state["phase"] == "queued" and key not in _preparation_pending and key != _preparation_active:
+            _preparation_pending.append(key)
+        for item, value in _preparation_states.items():
+            if (created and item == key) or value["roles"] != before.get(item, []):
+                events.append(_preparation_event_locked(value))
+        _preparation_condition.notify_all()
+        result = _public_preparation_state(state)
+    for event in events:
+        _emit_preparation(event)
+    return result
+
+
+def release_prepare_consumer(consumer):
+    events = []
+    with _preparation_condition:
+        _preparation_consumers.pop(consumer, None)
+        before = {key: list(state["roles"]) for key, state in _preparation_states.items()}
+        _refresh_preparation_roles_locked()
+        for key, state in _preparation_states.items():
+            if state["roles"] != before[key]:
+                events.append(_preparation_event_locked(state))
+        _preparation_condition.notify_all()
+    for event in events:
+        _emit_preparation(event)
+
+
+def get_preparation_snapshot():
+    """Full recovery snapshot for HTTP polling.
+
+    The runtime id and monotonic revision live on the snapshot root only.
+    Each state entry is the plain state dict: key, attempt_id, phase,
+    downloaded_bytes, total_bytes, progress, started_at, updated_at, error,
+    roles. Incremental callback events add runtime_id/revision per event.
+    """
+    with _preparation_condition:
+        active = _preparation_states.get(_preparation_active)
+        return {
+            "runtime_id": _preparation_runtime, "revision": _preparation_revision,
+            "active": _public_preparation_state(active) if active is not None else None,
+            "pending": [_public_preparation_state(_preparation_states[key]) for key in _preparation_pending],
+            "states": [_public_preparation_state(state) for state in _preparation_states.values()],
+        }
+
+
+def get_ready(model_size=None, language=None):
+    key = _preparation_key(model_size, language)
+    with _engine_lock:
+        engine = _whisper_engines.get(key)
+    return engine if engine is not None and engine.is_loaded else None
+
+
+def _preparation_worker(runtime):
+    global _preparation_active, _whisper_preload_done
+    while True:
+        with _preparation_condition:
+            _preparation_condition.wait_for(
+                lambda: runtime != _preparation_runtime or bool(_preparation_pending)
+            )
+            if runtime != _preparation_runtime:
+                return
+            key = _preparation_pending.pop(0)
+            _preparation_active = key
+            state = _preparation_states[key]
+            attempt = state["attempt_id"]
+            state.update(phase="resolving", started_at=time.time())
+            event = _preparation_event_locked(state)
+        _emit_preparation(event)
+        engine = None
+
+        def progress(update, key=key, attempt=attempt, state=state):
+            with _preparation_condition:
+                if runtime != _preparation_runtime or _preparation_states[key]["attempt_id"] != attempt:
+                    return
+                if state["phase"] in {"ready", "error"}:
+                    return
+                terminal = update.get("phase") in {"ready", "error"}
+                phase_changed = update.get("phase") != state["phase"]
+                bytes_changed = update.get("downloaded_bytes") != state["downloaded_bytes"]
+                last_emit = state[_LAST_PREPARATION_EMIT]
+                throttled = (
+                    not terminal
+                    and not phase_changed
+                    and last_emit is not None
+                    and time.monotonic() - last_emit < _PREPARATION_PROGRESS_MIN_INTERVAL
+                )
+                state.update(update)
+                changed = terminal or phase_changed or bytes_changed
+                event = _preparation_event_locked(state) if changed and not throttled else None
+            if event is not None:
+                _emit_preparation(event)
+
+        try:
+            with _preparation_condition:
+                if runtime != _preparation_runtime:
+                    return
+            engine = get_stt_engine(model_size=key[0], language=key[1], provider="whisper")
+            engine.load_model(progress=progress, retry=True)
+            if not engine.is_loaded:
+                raise RuntimeError("Whisper 模型准备已失效，请重试")
+            progress({"phase": "ready", "error": None})
+        except Exception as exc:
+            progress({"phase": "error", "error": str(exc) or type(exc).__name__})
+        finally:
+            with _preparation_condition:
+                stale = runtime != _preparation_runtime
+                if not stale:
+                    _preparation_active = None
+                    _whisper_preload_done = state["phase"] == "ready"
+                    # A retry admitted while this worker was still publishing its
+                    # terminal event was deliberately not queued (the key looked
+                    # active then). Promote it now; status polling never
+                    # re-enqueues, so dropping it would strand it in "queued".
+                    for queued_key, queued_state in _preparation_states.items():
+                        # roles is what keeps a queued target alive: a consumer
+                        # that moved on already had its stale target pruned.
+                        if (
+                            queued_state["phase"] == "queued"
+                            and queued_state["roles"]
+                            and queued_key not in _preparation_pending
+                        ):
+                            _preparation_pending.append(queued_key)
+                    _preparation_condition.notify_all()
+            if stale and engine is not None:
+                engine.close()
+        if stale:
+            return
+
+
+class WhisperInferenceBusy(RuntimeError):
+    pass
+
+
+def transcribe_whisper_for_test(engine, audio, sample_rate=16000, *, position="后端开发", language="Python", timeout=0.1):
+    if not engine.is_loaded:
+        raise RuntimeError("Whisper model is not ready")
+    if not _whisper_infer_lock.acquire(timeout=max(0.0, timeout)):
+        raise WhisperInferenceBusy("Whisper inference is busy")
+    try:
+        return engine.transcribe(audio, sample_rate, position=position, language=language)
+    finally:
+        _whisper_infer_lock.release()
 
 # ---------------------------------------------------------------------------
 # Circuit breaker for remote STT engines (doubao / generic)
@@ -151,12 +418,7 @@ def _get_whisper_fallback() -> STTEngine:
     lang = cfg.whisper_language or "auto"
     engine = get_stt_engine(provider="whisper", model_size=size, language=lang)
     if not engine.is_loaded:
-        _log.info("Whisper fallback: loading model %s", engine.model_size)
-        # Loading can take seconds; do not hold the global engine lock while
-        # faster-whisper initializes, or /ws init and start/resume can block.
-        engine.load_model()
-    if engine.is_loaded:
-        _whisper_preload_done = True
+        request_prepare(size, lang, consumer="fallback")
     return engine
 
 
@@ -200,7 +462,12 @@ def _whisper_transcribe(
         language=whisper_language,
     )
     if not engine.is_loaded:
-        _log.info("Whisper: loading model %s", engine.model_size)
+        state = request_prepare(model_size, whisper_language, consumer="fallback")
+        if state.get("phase") != "uninitialized":
+            return ""
+        # No lifespan-managed lane (router-only mount, CLI, bench): nobody would
+        # ever run the preparation, so keep the legacy synchronous load.
+        _log.info("Whisper: loading model %s outside the preparation lane", engine.model_size)
         engine.load_model()
     return _transcribe_with_whisper_lock(
         engine,
@@ -300,12 +567,16 @@ def _whisper_transcribe_fallback(
             language,
             whisper_lock_timeout_sec,
         )
-    _log.warning("Whisper fallback not loaded, loading synchronously for %.1fs audio", len(audio) / max(sample_rate, 1))
-    from api.realtime.ws import broadcast
-    broadcast({"type": status_event_type, "loaded": False, "loading": True, "provider": "whisper"})
+    state = request_prepare(size, lang, consumer="fallback")
+    if state.get("phase") != "uninitialized":
+        return ""
+    # Same legacy contract as _whisper_transcribe: without a lane there is no
+    # worker to prepare the model, so a queue-only return would stay empty.
+    _log.info("Whisper fallback: loading model %s outside the preparation lane", size)
     engine.load_model()
     _whisper_preload_done = bool(engine.is_loaded)
-    broadcast({"type": status_event_type, "loaded": bool(engine.is_loaded), "loading": False, "provider": "whisper"})
+    if not engine.is_loaded:
+        return ""
     return _transcribe_with_whisper_lock(
         engine,
         audio,
@@ -367,38 +638,15 @@ def _call_whisper_transcribe_fallback(
 
 
 def _do_whisper_load():
-    global _whisper_preload_done
-    from api.realtime.ws import broadcast
-    try:
-        _get_whisper_fallback()
-        _whisper_preload_done = True
-        _log.info("Whisper fallback model loaded after degradation")
-        broadcast({"type": "stt_status", "loaded": True, "loading": False, "provider": "whisper"})
-    except Exception as e:
-        _log.error("Whisper fallback load failed: %s", e, exc_info=True)
-        broadcast({"type": "stt_status", "loaded": False, "loading": False, "provider": "whisper", "error": str(e)})
+    request_prepare(consumer="fallback")
 
 
 def preload_whisper_fallback() -> None:
-    """Pre-load whisper model in background so fallback is instant when needed."""
+    """Request the optional remote-provider fallback on the managed lane."""
     from core.config import get_config
     cfg = get_config()
-    if not cfg.whisper_preload:
-        _log.info("Whisper preload disabled by config")
-        return
-    if cfg.stt_provider in ("doubao", "generic"):
-        def _load():
-            from api.realtime.ws import broadcast
-            broadcast({"type": "stt_status", "loaded": False, "loading": True, "provider": "whisper-preload"})
-            try:
-                _get_whisper_fallback()
-                _log.info("Whisper fallback model pre-loaded")
-                broadcast({"type": "stt_status", "loaded": True, "loading": False, "provider": "whisper-preload"})
-            except Exception as e:
-                _log.warning("Whisper fallback pre-load failed: %s", e)
-                broadcast({"type": "stt_status", "loaded": False, "loading": False, "provider": "whisper-preload", "error": str(e)})
-        t = threading.Thread(target=_load, daemon=True, name="whisper-preload")
-        t.start()
+    if cfg.whisper_preload and cfg.stt_provider in ("doubao", "generic"):
+        request_prepare(consumer="fallback")
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +655,17 @@ def preload_whisper_fallback() -> None:
 
 def set_whisper_language(language: str) -> None:
     global _engine
+    from core.config import get_config
+    cfg = get_config()
     lang = (language or "auto").strip() or "auto"
     with _engine_lock:
-        if _engine is not None:
-            _remove_whisper_engine_aliases_locked(_engine)
-            _engine.language = lang
-            _whisper_engines[(getattr(_engine, "model_size", "base") or "base", lang)] = _engine
+        model_size = getattr(_engine, "model_size", None) or cfg.whisper_model or "base"
+        key = (model_size, lang)
+        selected = _whisper_engines.get(key)
+        if selected is None:
+            selected = STTEngine(model_size=model_size, language=lang)
+            _whisper_engines[key] = selected
+        _engine = selected
 
 
 def get_stt_engine(
@@ -471,8 +724,6 @@ def get_stt_engine(
     key = (size or "base", lang or "auto")
     with _engine_lock:
         default_key = (cfg.whisper_model or "base", cfg.whisper_language or "auto")
-        if _engine is None and key == default_key:
-            _whisper_engines.pop(key, None)
         engine = _whisper_engines.get(key)
         if engine is not None and (
             getattr(engine, "model_size", None) != key[0]
@@ -535,9 +786,9 @@ def transcribe_with_fallback(
         _log.info("STT circuit open, using whisper fallback directly")
         broadcast({"type": fallback_event_type, "scope": circuit_scope, "from": selected_provider, "to": "whisper", "reason": "circuit_open"})
         whisper_loaded = _is_whisper_engine_loaded(whisper_model, whisper_language)
-        broadcast({"type": status_event_type, "loaded": whisper_loaded, "loading": not whisper_loaded, "provider": "whisper"})
         try:
             if whisper_loaded:
+                broadcast({"type": status_event_type, "loaded": True, "loading": False, "provider": "whisper"})
                 return _call_whisper_transcribe(
                     audio,
                     sample_rate,
@@ -584,13 +835,19 @@ def transcribe_with_fallback(
             if selected_provider == "whisper":
                 if not primary.is_loaded:
                     if whisper_require_loaded:
-                        _log.debug(
-                            "Whisper skip scope=%s reason=model_not_loaded model=%s",
-                            circuit_scope,
-                            getattr(primary, "model_size", ""),
-                        )
                         return ""
+                    prep_state = request_prepare(
+                        whisper_model, whisper_language,
+                        consumer="candidate" if circuit_scope == "candidate" else "main",
+                    )
+                    if prep_state.get("phase") != "uninitialized":
+                        return ""
+                    # No lifespan-managed lane (router-only mount, CLI, bench):
+                    # nobody would run the preparation, so keep the legacy load.
+                    _log.info("Whisper: loading model %s outside the preparation lane", whisper_model)
                     primary.load_model()
+                    if not primary.is_loaded:
+                        return ""
                 acquired = False
                 try:
                     if whisper_lock_timeout_sec is None:
@@ -694,9 +951,9 @@ def transcribe_with_fallback(
         _log.warning("STT fallback to whisper (primary=%s err=%s)", selected_provider, last_err)
         broadcast({"type": fallback_event_type, "scope": circuit_scope, "from": selected_provider, "to": "whisper", "reason": str(last_err)[:80]})
         whisper_loaded = _is_whisper_engine_loaded(whisper_model, whisper_language)
-        broadcast({"type": status_event_type, "loaded": whisper_loaded, "loading": not whisper_loaded, "provider": "whisper"})
         try:
             if whisper_loaded:
+                broadcast({"type": status_event_type, "loaded": True, "loading": False, "provider": "whisper"})
                 return _call_whisper_transcribe(
                     audio,
                     sample_rate,

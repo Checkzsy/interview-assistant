@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SpeechTab from './SpeechTab'
 import { updateConfigAndRefresh } from '@/lib/configSync'
@@ -7,6 +7,7 @@ import { useInterviewStore } from '@/stores/configStore'
 
 const apiMock = vi.hoisted(() => ({
   sttTest: vi.fn(),
+  getSttStatus: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -27,12 +28,24 @@ function createDeferred<T>() {
   return { promise, resolve, reject }
 }
 
-describe('SpeechTab', () => {
-  beforeEach(() => {
+beforeEach(() => {
     vi.mocked(updateConfigAndRefresh).mockReset()
-    vi.mocked(updateConfigAndRefresh).mockResolvedValue({ ok: true } as any)
+    vi.mocked(updateConfigAndRefresh).mockImplementation(async (data) => ({
+      ...useInterviewStore.getState().config!,
+      ...data,
+      stt_config_version: 'v-1',
+    }))
     apiMock.sttTest.mockReset()
     apiMock.sttTest.mockResolvedValue({ ok: true, text: 'demo' })
+    apiMock.getSttStatus.mockReset()
+    apiMock.getSttStatus.mockResolvedValue({
+      loaded: false,
+      loading: false,
+      model: 'base',
+      provider: 'whisper',
+      config_version: 'v-1',
+      preparation: { runtime_id: null, revision: 0, active: null, pending: [], states: [] },
+    })
 
     useInterviewStore.setState({
       config: {
@@ -73,9 +86,21 @@ describe('SpeechTab', () => {
         whisper_models: ['tiny', 'base'],
       },
       toastMessage: null,
+      setToastMessage: vi.fn(),
+      sttPreparation: { runtime_id: null, revision: 0, active: null, pending: [], states: [] },
+      sttLastAcceptedPreparation: null,
+      sttRetiredRuntimes: [],
+      sttConfigVersion: 'v-1',
+      wsConnected: false,
     } as any)
   })
 
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
+
+describe('SpeechTab', () => {
   it('shows a warning when the saved provider is no longer supported', async () => {
     render(<SpeechTab />)
 
@@ -323,5 +348,228 @@ describe('SpeechTab', () => {
     })
 
     expect(screen.getByText('连接成功')).toBeInTheDocument()
+  })
+
+  it('keeps edits made during an in-flight save and does not test the stale form', async () => {
+    const save = createDeferred<{ ok: boolean; stt_config_version?: string }>()
+    vi.mocked(updateConfigAndRefresh).mockReturnValueOnce(save.promise as any)
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper' },
+    }) as any)
+
+    render(<SpeechTab />)
+
+    fireEvent.click(screen.getByText('保存并测试'))
+    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+
+    await act(async () => {
+      save.resolve({ ok: true, stt_config_version: 'v-2' })
+      await save.promise
+    })
+
+    expect(screen.getByDisplayValue('tiny')).toBeInTheDocument()
+    expect(apiMock.sttTest).not.toHaveBeenCalled()
+  })
+
+  it('ignores a late test result after the form was edited', async () => {
+    const stt = createDeferred<{ ok: boolean; text: string }>()
+    apiMock.sttTest.mockReturnValueOnce(stt.promise)
+    useInterviewStore.setState((state) => ({
+      config: { ...(state.config as any), stt_provider: 'whisper' },
+    }) as any)
+
+    render(<SpeechTab />)
+
+    fireEvent.click(screen.getByText('保存并测试'))
+    await waitFor(() => expect(apiMock.sttTest).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(screen.getByDisplayValue('base'), { target: { value: 'tiny' } })
+
+    await act(async () => {
+      stt.resolve({ ok: true, text: 'hello' })
+      await stt.promise
+    })
+
+    expect(screen.queryByText('连接成功')).not.toBeInTheDocument()
+  })
+})
+
+describe('SpeechTab staged preparation feedback', () => {
+  const prepState = (overrides: Record<string, unknown> = {}) => ({
+    key: ['base', 'auto'],
+    attempt_id: 'a1',
+    phase: 'downloading',
+    downloaded_bytes: 30,
+    total_bytes: 100,
+    progress: 30,
+    started_at: 1,
+    updated_at: 2,
+    error: null,
+    roles: ['main'],
+    ...overrides,
+  })
+
+  const statusPayload = (prep: Record<string, unknown>, revision = 1) => ({
+    loaded: false,
+    loading: true,
+    model: 'base',
+    provider: 'whisper',
+    config_version: 'v-1',
+    preparation: { runtime_id: 'rt-1', revision, active: null, pending: [], states: [prep] },
+  })
+
+  it('loads the current preparation snapshot on mount', async () => {
+    apiMock.getSttStatus.mockResolvedValueOnce(statusPayload(prepState({ phase: 'resolving', downloaded_bytes: null, total_bytes: null })))
+
+    render(<SpeechTab />)
+
+    await waitFor(() => expect(apiMock.getSttStatus).toHaveBeenCalledTimes(1))
+  })
+
+  it('waits for the model, then runs the real test exactly once', async () => {
+    apiMock.sttTest
+      .mockResolvedValueOnce({ ok: false, pending: true, config_version: 'v-1', attempt_id: 'a1', state: prepState({ phase: 'downloading' }) })
+      .mockResolvedValueOnce({ ok: true, text: 'demo', config_version: 'v-1' })
+    apiMock.getSttStatus
+      .mockResolvedValueOnce(statusPayload(prepState({ phase: 'downloading', downloaded_bytes: 30, total_bytes: 100, progress: 30 })))
+      .mockResolvedValueOnce(statusPayload(prepState({ phase: 'ready', downloaded_bytes: 100, total_bytes: 100, progress: 100 }), 2))
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText(/正在下载模型 30%/)).toBeInTheDocument()
+
+    await waitFor(() => expect(apiMock.sttTest).toHaveBeenCalledTimes(2), { timeout: 6000 })
+    expect(await screen.findByText('连接成功')).toBeInTheDocument()
+  })
+
+  it('never rounds a partially downloaded model up to 100%', async () => {
+    apiMock.sttTest.mockResolvedValueOnce({
+      ok: false,
+      pending: true,
+      config_version: 'v-1',
+      attempt_id: 'a1',
+      state: prepState({ phase: 'downloading', downloaded_bytes: 999, total_bytes: 1000, progress: 99.9 }),
+    })
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText(/正在下载模型 99%/)).toBeInTheDocument()
+    expect(screen.queryByText(/正在下载模型 100%/)).not.toBeInTheDocument()
+  })
+
+  it('reports a busy admission instead of pretending to download', async () => {
+    apiMock.sttTest.mockResolvedValueOnce({
+      ok: false,
+      busy: true,
+      reason: 'admission_busy',
+      config_version: 'v-1',
+      detail: 'STT 测试繁忙，请等待当前测试结束后重试',
+    })
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText(/正在测试其他配置/)).toBeInTheDocument()
+    expect(screen.queryByText(/正在下载/)).not.toBeInTheDocument()
+  })
+
+  it('shows the full download error and retries only on request', async () => {
+    const longError = '连接 huggingface.co 失败：SSL 证书校验未通过，请检查代理或网络设置后重试（错误码 7）'
+    apiMock.sttTest
+      .mockResolvedValueOnce({ ok: false, config_version: 'v-1', state: prepState({ phase: 'error', error: longError }), detail: longError })
+      .mockResolvedValueOnce({ ok: false, pending: true, config_version: 'v-1', attempt_id: 'a2', state: prepState({ phase: 'resolving' }) })
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText(new RegExp('SSL 证书校验未通过'))).toBeInTheDocument()
+    expect(apiMock.sttTest).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试准备并测试' }))
+
+    await waitFor(() => expect(apiMock.sttTest).toHaveBeenCalledTimes(2))
+    expect(apiMock.sttTest.mock.calls[1][0]).toMatchObject({ retry: true })
+  })
+
+  it('follows the lane when the attempt is replaced without a new pending response', async () => {
+    apiMock.sttTest
+      .mockResolvedValueOnce({ ok: false, pending: true, config_version: 'v-1', attempt_id: 'a1', state: prepState({ phase: 'downloading' }) })
+      .mockResolvedValueOnce({ ok: true, text: 'demo', config_version: 'v-1' })
+    // Nothing tells this tab about a2 except the status snapshot: another tab
+    // retried, so the a1 state no longer exists.
+    apiMock.getSttStatus
+      .mockResolvedValueOnce(statusPayload(prepState({ phase: 'downloading' })))
+      .mockResolvedValueOnce(statusPayload(prepState({ attempt_id: 'a2', phase: 'ready', progress: 100 }), 2))
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText('连接成功', {}, { timeout: 6000 })).toBeInTheDocument()
+    expect(apiMock.sttTest.mock.calls[1][0]).toMatchObject({ attempt_id: 'a2' })
+  })
+
+  it('re-arms the staged test when the backend hands back a superseded attempt', async () => {
+    apiMock.sttTest
+      .mockResolvedValueOnce({ ok: false, pending: true, config_version: 'v-1', attempt_id: 'a1', state: prepState({ phase: 'downloading' }) })
+      // The real test raced a replacement: the answer is "still preparing", not
+      // a result. The panel must follow the new attempt instead of sticking on
+      // "测试中…" forever.
+      .mockResolvedValueOnce({ ok: false, pending: true, config_version: 'v-1', attempt_id: 'a2', state: prepState({ attempt_id: 'a2', phase: 'downloading' }) })
+      .mockResolvedValueOnce({ ok: true, text: 'demo', config_version: 'v-1' })
+    apiMock.getSttStatus
+      .mockResolvedValueOnce(statusPayload(prepState({ phase: 'ready', progress: 100 })))
+      .mockResolvedValueOnce(statusPayload(prepState({ attempt_id: 'a2', phase: 'ready', progress: 100 }), 2))
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    expect(await screen.findByText('连接成功', {}, { timeout: 6000 })).toBeInTheDocument()
+    expect(apiMock.sttTest).toHaveBeenCalledTimes(3)
+    expect(apiMock.sttTest.mock.calls[2][0]).toMatchObject({ attempt_id: 'a2' })
+  })
+
+  it('does not re-POST the same attempt while the snapshot still reads ready', async () => {
+    apiMock.sttTest.mockResolvedValue({
+      ok: false,
+      pending: true,
+      config_version: 'v-1',
+      attempt_id: 'a1',
+      state: prepState({ phase: 'downloading' }),
+    })
+    // The snapshot is stale: it still says ready for the attempt that just
+    // answered "pending". Re-testing at the same revision would spin.
+    apiMock.getSttStatus.mockResolvedValue(statusPayload(prepState({ phase: 'ready', progress: 100 })))
+
+    render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+
+    // One admission POST plus one real test for attempt a1; the stale "ready"
+    // snapshot must not add a third.
+    await waitFor(() => expect(apiMock.sttTest).toHaveBeenCalledTimes(2))
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2500)) })
+
+    expect(apiMock.sttTest).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops polling when the panel unmounts', async () => {
+    apiMock.sttTest.mockResolvedValueOnce({
+      ok: false,
+      pending: true,
+      config_version: 'v-1',
+      attempt_id: 'a1',
+      state: prepState({ phase: 'downloading' }),
+    })
+
+    const view = render(<SpeechTab />)
+    fireEvent.click(screen.getByText('保存并测试'))
+    await screen.findByText(/正在下载模型/)
+
+    const callsBeforeUnmount = apiMock.getSttStatus.mock.calls.length
+    view.unmount()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2200)) })
+
+    expect(apiMock.getSttStatus.mock.calls.length).toBe(callsBeforeUnmount)
   })
 })

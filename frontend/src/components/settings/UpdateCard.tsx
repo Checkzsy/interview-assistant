@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, Download, PackageCheck, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import { formatBytes } from '@/lib/formatBytes'
 
 const IDLE_STATE: UpdaterState = {
   current: null,
@@ -13,14 +14,6 @@ const IDLE_STATE: UpdaterState = {
   download: { status: 'idle', received: 0, total: 0, error: null, downloadedPath: null },
   installing: false,
   installError: null,
-}
-
-function formatBytes(n: number | null | undefined): string {
-  const num = Number(n) || 0
-  if (num <= 0) return '—'
-  if (num < 1024) return `${num} B`
-  if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`
-  return `${(num / 1024 / 1024).toFixed(1)} MB`
 }
 
 function formatProgress(state: UpdaterState): string {

@@ -107,6 +107,26 @@ export function useInterviewWS(active = true) {
     switch (msg.type) {
       case 'init':
         s.setInitData(msg as Parameters<typeof s.setInitData>[0])
+        if (msg.stt_preparation) {
+          s.applySttPreparation(
+            msg.stt_preparation as Parameters<typeof s.applySttPreparation>[0],
+            msg.stt_config_version as string | undefined,
+          )
+        } else if (msg.stt_config_version) {
+          s.setSttConfigVersion(msg.stt_config_version as string)
+        }
+        break
+      case 'stt_preparation':
+        // The snapshot root revision is authoritative and the store rejects
+        // anything older, so a late frame can never move the UI backwards. The
+        // version is applied together with the snapshot it belongs to, so a
+        // dropped snapshot cannot leave a mismatched saved identity behind.
+        if (msg.preparation) {
+          s.applySttPreparation(
+            msg.preparation as Parameters<typeof s.applySttPreparation>[0],
+            msg.config_version as string | undefined,
+          )
+        }
         break
       case 'recording':
         s.setRecording(msg.value as boolean)

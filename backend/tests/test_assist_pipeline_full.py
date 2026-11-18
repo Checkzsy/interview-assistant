@@ -92,13 +92,13 @@ def reset_pipeline_state(monkeypatch: pytest.MonkeyPatch):
     pipeline._next_commit_seq = 0
     pipeline._next_submit_seq = 0
     pipeline._task_session_version = 0
+    monkeypatch.setattr(pipeline, "_recording_group", None)
     pipeline._interview_thread = None
     pipeline._candidate_thread = None
     pipeline._stop_event.clear()
     pipeline._pause_event.clear()
     pipeline._candidate_flush_event.clear()
     pipeline._flush_stop_event.clear()
-    pipeline._candidate_whisper_preload_inflight.clear()
     _DeferredThread.started = []
     _DeferredTimer.started = []
 
@@ -429,61 +429,96 @@ def test_late_asr_constraint_tail_updates_deferred_pending_task(monkeypatch: pyt
     ]
 
 
-def test_candidate_whisper_preload_runs_in_background(monkeypatch: pytest.MonkeyPatch):
+def test_main_prepare_error_is_not_overwritten_by_loading_status(monkeypatch: pytest.MonkeyPatch):
+    """A terminal preparation error must reach the client with its reason.
+
+    Publishing loading=True right after the error leaves the legacy status
+    channel spinning forever: the ASR worker skips every segment and the lane
+    emits nothing more until an explicit retry.
+    """
     broadcasts: list[dict] = []
-    calls = {"load": 0}
-
-    class _FakeWhisper:
-        @property
-        def is_loaded(self):
-            return calls["load"] > 0
-
-        def load_model(self):
-            calls["load"] += 1
-
-    def fake_get_stt_engine(**kwargs):
-        assert kwargs == {
-            "provider": "whisper",
-            "model_size": "base",
-            "language": "auto",
-        }
-        return _FakeWhisper()
-
-    monkeypatch.setattr(pipeline, "broadcast", broadcasts.append)
-    monkeypatch.setattr(pipeline, "get_stt_engine", fake_get_stt_engine)
-
-    pipeline._preload_candidate_whisper_async("whisper", "base", "auto")
-
-    assert len(_DeferredThread.started) == 1
-    _DeferredThread.started[0].run()
-
-    assert calls["load"] == 1
-    assert broadcasts[-1] == {
-        "type": "candidate_asr_status",
-        "loaded": True,
-        "loading": False,
-        "provider": "whisper",
-    }
-
-
-def test_candidate_whisper_preload_failure_only_reports_candidate_status(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    broadcasts: list[dict] = []
-    monkeypatch.setattr(pipeline, "broadcast", broadcasts.append)
+    engine = SimpleNamespace(is_loaded=False)
+    cfg = SimpleNamespace(stt_provider="whisper", whisper_model="medium", whisper_language="zh")
+    monkeypatch.setattr(pipeline, "get_preparation_snapshot", lambda: {"runtime_id": "rt"}, raising=False)
     monkeypatch.setattr(
         pipeline,
-        "get_stt_engine",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("candidate model bad")),
+        "request_prepare",
+        lambda *args, **kwargs: {"phase": "error", "error": "medium 下载失败：连接超时", "attempt_id": "a1"},
+        raising=False,
     )
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args, **kwargs: None, raising=False)
+
+    assert pipeline._prepare_main_engine(cfg, engine, broadcasts.append) is engine
+    assert [item for item in broadcasts if item["type"] == "stt_status"] == [
+        {
+            "type": "stt_status",
+            "loaded": False,
+            "loading": False,
+            "provider": "whisper",
+            "error": "medium 下载失败：连接超时",
+        }
+    ]
+
+
+def test_main_prepare_does_not_publish_a_transient_frame(monkeypatch: pytest.MonkeyPatch):
+    """Progress comes from the lane bridge; a transient frame here can race an error.
+
+    Reading the state and then publishing it leaves a window where the worker
+    fails in between, so the last legacy frame would say loading=True after the
+    terminal error.
+    """
+    broadcasts: list[dict] = []
+    engine = SimpleNamespace(is_loaded=False)
+    cfg = SimpleNamespace(stt_provider="whisper", whisper_model="medium", whisper_language="zh")
+    monkeypatch.setattr(pipeline, "get_preparation_snapshot", lambda: {"runtime_id": "rt"}, raising=False)
+    monkeypatch.setattr(pipeline, "request_prepare", lambda *args, **kwargs: {"phase": "downloading"}, raising=False)
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args, **kwargs: None, raising=False)
+
+    assert pipeline._prepare_main_engine(cfg, engine, broadcasts.append) is engine
+    assert broadcasts == []
+
+
+def test_main_prepare_adopts_the_ready_engine_without_a_loading_frame(monkeypatch: pytest.MonkeyPatch):
+    broadcasts: list[dict] = []
+    engine = SimpleNamespace(is_loaded=False)
+    ready = SimpleNamespace(is_loaded=True)
+    cfg = SimpleNamespace(stt_provider="whisper", whisper_model="medium", whisper_language="zh")
+    monkeypatch.setattr(pipeline, "get_preparation_snapshot", lambda: {"runtime_id": "rt"}, raising=False)
+    monkeypatch.setattr(pipeline, "request_prepare", lambda *args, **kwargs: {"phase": "ready"}, raising=False)
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args, **kwargs: ready, raising=False)
+
+    assert pipeline._prepare_main_engine(cfg, engine, broadcasts.append) is ready
+    assert [item for item in broadcasts if item.get("loading") is True] == []
+
+
+def test_candidate_whisper_preload_requests_managed_preparation(monkeypatch: pytest.MonkeyPatch):
+    requests = []
+    broadcasts = []
+    monkeypatch.setattr(pipeline, "request_prepare", lambda *args, **kwargs: requests.append((args, kwargs)) or {"phase": "queued"}, raising=False)
+    monkeypatch.setattr(pipeline, "broadcast", broadcasts.append)
 
     pipeline._preload_candidate_whisper_async("whisper", "base", "auto")
-    _DeferredThread.started[0].run()
 
+    assert requests == [(("base", "auto"), {"consumer": "candidate"})]
+    assert _DeferredThread.started == []
     assert broadcasts[-1]["type"] == "candidate_asr_status"
-    assert broadcasts[-1]["provider"] == "whisper"
     assert broadcasts[-1]["loaded"] is False
-    assert "candidate model bad" in broadcasts[-1]["error"]
+    assert broadcasts[-1]["loading"] is True
+
+
+def test_candidate_whisper_preload_failure_never_reports_microphone_error(monkeypatch: pytest.MonkeyPatch):
+    broadcasts = []
+    warnings = []
+    monkeypatch.setattr(pipeline, "request_prepare", lambda *args, **kwargs: {"phase": "error", "error": "candidate model bad"}, raising=False)
+    monkeypatch.setattr(pipeline, "broadcast", broadcasts.append)
+    monkeypatch.setattr(pipeline._elog, "warning", lambda *args: warnings.append(args))
+
+    pipeline._preload_candidate_whisper_async("whisper", "base", "auto")
+
+    assert _DeferredThread.started == []
+    assert broadcasts[-1] == {"type": "candidate_asr_status", "loaded": False, "loading": False, "provider": "whisper"}
+    assert "error" not in broadcasts[-1]
+    assert warnings[-1][-1] == "candidate model bad"
 
 
 def test_startup_preloads_candidate_whisper_when_enabled(monkeypatch: pytest.MonkeyPatch):
@@ -559,22 +594,23 @@ def test_stop_waits_for_worker_flush_before_review_archive(monkeypatch: pytest.M
     assert archived_counts == [1]
 
 
-def test_candidate_whisper_preload_deduplicates_inflight_model(monkeypatch: pytest.MonkeyPatch):
-    class _LoadedWhisper:
-        is_loaded = True
-
-        def load_model(self):
-            raise AssertionError("already loaded")
-
-    monkeypatch.setattr(pipeline, "get_stt_engine", lambda **_kwargs: _LoadedWhisper())
+def test_candidate_whisper_preload_delegates_repeated_requests_to_lane(monkeypatch: pytest.MonkeyPatch):
+    requests = []
+    monkeypatch.setattr(
+        pipeline,
+        "request_prepare",
+        lambda *args, **kwargs: requests.append((args, kwargs)) or {"phase": "queued"},
+        raising=False,
+    )
 
     pipeline._preload_candidate_whisper_async("whisper", "base", "auto")
     pipeline._preload_candidate_whisper_async("whisper", "base", "auto")
 
-    assert len(_DeferredThread.started) == 1
-    assert ("base", "auto") in pipeline._candidate_whisper_preload_inflight
-    _DeferredThread.started[0].run()
-    assert pipeline._candidate_whisper_preload_inflight == set()
+    assert requests == [
+        (("base", "auto"), {"consumer": "candidate"}),
+        (("base", "auto"), {"consumer": "candidate"}),
+    ]
+    assert _DeferredThread.started == []
 
 
 def test_candidate_audio_start_failure_does_not_block_interviewer_chain(

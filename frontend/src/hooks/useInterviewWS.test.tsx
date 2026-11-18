@@ -377,4 +377,88 @@ describe('useInterviewWS', () => {
     expect(state.resumeOptResult).toBe('后台分析完成')
     expect(state.resumeOptLoading).toBe(false)
   })
+
+  it('applies the preparation snapshot from init and later increments', () => {
+    render(<Harness />)
+    const ws = FakeWebSocket.instances[0]
+    const preparation = {
+      runtime_id: 'rt-1',
+      revision: 2,
+      active: null,
+      pending: [],
+      states: [{ key: ['medium', 'zh'], attempt_id: 'a1', phase: 'resolving', downloaded_bytes: null, total_bytes: null, progress: null, started_at: 1, updated_at: 2, error: null, roles: ['main'] }],
+    }
+
+    act(() => {
+      ws.emitOpen()
+      ws.emitMessage({ type: 'init', stt_loaded: false, stt_config_version: 'v-1', stt_preparation: preparation })
+    })
+
+    expect(useInterviewStore.getState().sttPreparation.states[0].phase).toBe('resolving')
+    expect(useInterviewStore.getState().sttConfigVersion).toBe('v-1')
+
+    act(() => {
+      ws.emitMessage({
+        type: 'stt_preparation',
+        config_version: 'v-2',
+        preparation: {
+          ...preparation,
+          revision: 3,
+          states: [{ ...preparation.states[0], phase: 'downloading', downloaded_bytes: 30, total_bytes: 100, progress: 30 }],
+        },
+      })
+    })
+
+    const applied = useInterviewStore.getState().sttPreparation
+    expect(applied.revision).toBe(3)
+    expect(applied.states[0].progress).toBe(30)
+    expect(useInterviewStore.getState().sttConfigVersion).toBe('v-2')
+  })
+
+  it('keeps the config version in step with the snapshot it arrived with', () => {
+    render(<Harness />)
+    const ws = FakeWebSocket.instances[0]
+    const prep = (revision: number) => ({
+      runtime_id: 'rt-1',
+      revision,
+      active: null,
+      pending: [],
+      states: [],
+    })
+
+    act(() => {
+      ws.emitOpen()
+      ws.emitMessage({ type: 'stt_preparation', config_version: 'v-9', preparation: prep(9) })
+      // An out-of-order older frame must not roll the accepted version back.
+      ws.emitMessage({ type: 'stt_preparation', config_version: 'v-4', preparation: prep(4) })
+    })
+
+    expect(useInterviewStore.getState().sttPreparation.revision).toBe(9)
+    expect(useInterviewStore.getState().sttConfigVersion).toBe('v-9')
+  })
+
+  it('ignores a preparation snapshot older than the one already rendered', () => {    render(<Harness />)
+    const ws = FakeWebSocket.instances[0]
+    const newer = {
+      runtime_id: 'rt-1',
+      revision: 9,
+      active: null,
+      pending: [],
+      states: [{ key: ['medium', 'zh'], attempt_id: 'a1', phase: 'downloading', downloaded_bytes: 90, total_bytes: 100, progress: 90, started_at: 1, updated_at: 2, error: null, roles: ['main'] }],
+    }
+
+    act(() => {
+      ws.emitOpen()
+      ws.emitMessage({ type: 'stt_preparation', config_version: 'v-1', preparation: newer })
+      ws.emitMessage({
+        type: 'stt_preparation',
+        config_version: 'v-1',
+        preparation: { ...newer, revision: 4, states: [{ ...newer.states[0], progress: 10 }] },
+      })
+    })
+
+    const applied = useInterviewStore.getState().sttPreparation
+    expect(applied.revision).toBe(9)
+    expect(applied.states[0].progress).toBe(90)
+  })
 })

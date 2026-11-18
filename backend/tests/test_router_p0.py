@@ -561,6 +561,62 @@ def test_stt_test_rejects_empty_transcription(monkeypatch):
     assert "空文本" in result["detail"]
 
 
+def test_stt_test_returns_inference_errors_instead_of_propagating(monkeypatch):
+    monkeypatch.setattr(common_router, "get_config", lambda: _Body(stt_provider="generic", generic_stt_api_base_url="https://x", generic_stt_api_key="sk", generic_stt_model="m"))
+
+    class _BrokenEngine:
+        def transcribe(self, audio, sample_rate=16000):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(common_router, "get_stt_engine", lambda: _BrokenEngine())
+    monkeypatch.setattr(common_router.Path, "exists", lambda self: False)
+
+    result = _run(common_router.api_stt_test())
+
+    assert result == {"ok": False, "detail": "boom"}
+
+    monkeypatch.setattr(common_router, "get_stt_engine", lambda: _Body(transcribe=lambda *args, **kwargs: "recovered"))
+    assert _run(common_router.api_stt_test()) == {"ok": True, "text": "recovered"}
+
+
+@pytest.mark.parametrize("failure_at", ["engine", "audio"])
+def test_stt_test_setup_errors_release_admission(monkeypatch, failure_at):
+    audio_mod = importlib.import_module("services.audio")
+    monkeypatch.setattr(common_router, "get_config", lambda: _Body(stt_provider="whisper"))
+    monkeypatch.setattr(common_router.Path, "exists", lambda self: True)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("setup failed")
+
+    engine = _Body(transcribe=lambda *args, **kwargs: "recovered")
+    monkeypatch.setattr(common_router, "get_stt_engine", fail if failure_at == "engine" else lambda: engine)
+    monkeypatch.setattr(audio_mod, "load_wav_file", fail)
+
+    assert _run(common_router.api_stt_test()) == {"ok": False, "detail": "setup failed"}
+
+    monkeypatch.setattr(common_router, "get_stt_engine", lambda: engine)
+    monkeypatch.setattr(common_router.Path, "exists", lambda self: False)
+    assert _run(common_router.api_stt_test()) == {"ok": True, "text": "recovered"}
+
+
+@pytest.mark.parametrize(("provider", "fields", "detail"), [
+    ("doubao", {}, "API Key 或 Access Token"),
+    ("doubao", {"doubao_stt_access_token": "token"}, "App ID"),
+    ("generic", {}, "Base URL"),
+    ("generic", {"generic_stt_api_base_url": "https://x"}, "API Key"),
+    ("generic", {"generic_stt_api_base_url": "https://x", "generic_stt_api_key": "key"}, "Model"),
+])
+def test_stt_test_keeps_credential_prechecks(monkeypatch, provider, fields, detail):
+    cfg = _Body(**({"stt_provider": provider, "doubao_stt_access_token": "", "doubao_stt_app_id": ""} | fields))
+    monkeypatch.setattr(common_router, "get_config", lambda: cfg)
+    monkeypatch.setattr(common_router, "get_stt_engine", lambda: pytest.fail("credentials must be checked first"))
+
+    result = _run(common_router.api_stt_test())
+
+    assert result["ok"] is False
+    assert detail in result["detail"]
+
+
 def test_update_config_rejects_all_disabled_models(monkeypatch):
     """完整模型配置保存也不能留下 0 个启用模型。"""
 

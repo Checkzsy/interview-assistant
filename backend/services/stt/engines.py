@@ -20,6 +20,7 @@ import requests
 
 from core.logger import get_logger
 from .text_utils import TECH_VOCAB, _postprocess, _build_initial_prompt
+from .model_files import prepare_model_files, _BUNDLED_WHISPER_FILES, _require_bundled_model_files
 
 _log = get_logger("stt.engines")
 
@@ -544,7 +545,6 @@ class GenericHTTPSTT:
 # first use works with no network. Only sizes listed here may be loaded from
 # the bundle; other sizes still resolve through the normal HF cache/download.
 _BUNDLED_WHISPER_SIZES = ("base",)
-_BUNDLED_WHISPER_FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")
 
 
 def _bundled_whisper_model_dir() -> Path:
@@ -564,15 +564,6 @@ def _bundled_model_path(model_size: str) -> Optional[Path]:
             f"内置 Whisper 模型目录缺失（{bundled}）。请重新安装应用修复，或改用其他 STT 引擎。"
         )
     return None
-
-
-def _require_bundled_model_files(path: Path) -> None:
-    missing = [name for name in _BUNDLED_WHISPER_FILES if not (path / name).is_file()]
-    if missing:
-        raise RuntimeError(
-            f"内置 Whisper 模型文件不完整（{path}），缺少：{', '.join(missing)}。"
-            "请重新安装应用修复，或改用其他 STT 引擎。"
-        )
 
 
 def _looks_like_network_error(err: Exception) -> bool:
@@ -661,6 +652,27 @@ class STTEngine:
         self._model = None
         self._lock = threading.Lock()
         self._loading = False
+        self._attempt_id = 0
+        self._closed = False
+        self._load_done = threading.Event()
+        self._preparation = {"phase": "idle", "error": None}
+
+    def get_ready(self):
+        with self._lock:
+            return self._model
+
+    def prepare_snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._preparation)
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            self._attempt_id += 1
+            self._model = None
+            self._loading = False
+            self._preparation = {"phase": "closed", "error": None}
+            self._load_done.set()
 
     @staticmethod
     def _best_device() -> tuple[str, str]:
@@ -677,46 +689,96 @@ class STTEngine:
             pass
         return "cpu", "int8"
 
-    def load_model(self):
+    def load_model(self, progress=None, retry=False):
         with self._lock:
-            if self._model is not None:
+            if self._closed or self._model is not None:
                 return
-            self._loading = True
+            if self._loading:
+                done = self._load_done
+                attempt = None
+            else:
+                if self._preparation["phase"] == "error" and not retry:
+                    raise RuntimeError(self._preparation["error"])
+                self._attempt_id += 1
+                attempt = self._attempt_id
+                self._loading = True
+                done = self._load_done = threading.Event()
+                self._preparation = {"phase": "resolving", "error": None}
+        if attempt is None:
+            done.wait()
+            snapshot = self.prepare_snapshot()
+            if snapshot.get("error"):
+                raise RuntimeError(snapshot["error"])
+            return
+
+        def report(event):
+            event = dict(event)
+            if event.get("phase") == "downloaded":
+                event["phase"] = "loading"
+            with self._lock:
+                if self._closed or self._attempt_id != attempt:
+                    return
+                self._preparation.update(event)
+                snapshot = dict(self._preparation)
+            if progress is not None:
+                try:
+                    progress(snapshot)
+                except Exception:
+                    _log.exception("Whisper preparation callback failed")
+
+        bundled = None
+        try:
+            report({"phase": "resolving"})
+            # Keep the existing bundle injection seam local to this engine;
+            # never replace SDK functions or resolver globals.
+            bundled = _bundled_model_path(self.model_size)
+            if bundled is not None:
+                _require_bundled_model_files(bundled)
+                model_path = bundled
+            else:
+                model_path = prepare_model_files(self.model_size, on_progress=report)
+            report({"phase": "loading"})
             try:
-                bundled = _bundled_model_path(self.model_size)
-                if bundled is not None:
-                    _require_bundled_model_files(bundled)
-                try:
-                    from faster_whisper import WhisperModel
-                except ImportError as e:
-                    raise RuntimeError(
-                        "缺少 faster-whisper 依赖，无法使用 Whisper 本地引擎。"
-                        "请运行 pip install faster-whisper，或重新安装应用修复。"
-                    ) from e
-                device, compute_type = self._best_device()
-                try:
-                    self._model = WhisperModel(
-                        str(bundled) if bundled is not None else self.model_size,
-                        device=device,
-                        compute_type=compute_type,
-                    )
-                except Exception as e:
-                    raise RuntimeError(_whisper_load_error(e, bundled, self.model_size)) from e
-            finally:
-                self._loading = False
+                from faster_whisper import WhisperModel
+            except ImportError as e:
+                raise RuntimeError(
+                    "缺少 faster-whisper 依赖，无法使用 Whisper 本地引擎。"
+                    "请运行 pip install faster-whisper，或重新安装应用修复。"
+                ) from e
+            device, compute_type = self._best_device()
+            model = WhisperModel(str(model_path), device=device, compute_type=compute_type)
+            with self._lock:
+                if self._closed or self._attempt_id != attempt:
+                    return
+                self._model = model
+            report({"phase": "ready", "error": None})
+        except Exception as e:
+            message = _whisper_load_error(e, bundled, self.model_size)
+            report({"phase": "error", "error": message})
+            raise RuntimeError(message) from e
+        finally:
+            with self._lock:
+                if self._attempt_id == attempt:
+                    self._loading = False
+                done.set()
 
     def change_model(self, model_size: str):
-        if model_size == self.model_size and self._model is not None:
-            return
         with self._lock:
+            if model_size == self.model_size:
+                return
+            self._attempt_id += 1
+            self._load_done.set()
+            self._loading = False
             self._model = None
+            self._preparation = {"phase": "idle", "error": None}
             self.model_size = model_size
         self.load_model()
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
                    position: str = "后端开发", language: str = "Python") -> str:
-        if self._model is None:
-            self.load_model()
+        model = self.get_ready()
+        if model is None:
+            return ""
 
         audio_f = audio.astype(np.float32)
         if audio_f.max() > 1.0:
@@ -751,9 +813,9 @@ class STTEngine:
         )
 
         try:
-            segments, _ = self._model.transcribe(audio_f, hotwords=hotwords_str, **kwargs)
+            segments, _ = model.transcribe(audio_f, hotwords=hotwords_str, **kwargs)
         except TypeError:
-            segments, _ = self._model.transcribe(audio_f, **kwargs)
+            segments, _ = model.transcribe(audio_f, **kwargs)
 
         texts = []
         for seg in segments:

@@ -6,9 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from core.auth import is_auth_disabled, loopback_bypass_allowed, verify_token
+from core.config import get_config, stt_config_fingerprint
 from core.logger import get_logger
 from core.session import snapshot_session
 from services.stt import get_stt_engine
+from services.stt.factory import get_preparation_snapshot
 
 _log = get_logger("ws")
 
@@ -180,6 +182,8 @@ async def websocket_endpoint(ws: WebSocket):
             "is_recording": snapshot["is_recording"],
             "is_paused": snapshot["is_paused"],
             "stt_loaded": engine.is_loaded,
+            "stt_config_version": stt_config_fingerprint(get_config()),
+            "stt_preparation": get_preparation_snapshot(),
             "transcriptions": snapshot["transcriptions"],
             "candidate_transcriptions": snapshot.get("candidate_transcriptions", []),
             "candidate_answer_segments": snapshot.get("candidate_answer_segments", []),

@@ -377,7 +377,7 @@ def test_transcribe_with_fallback_retries_remote_once_before_fallback(monkeypatc
     assert calls["sleep"] == [0.3]
 
 
-def test_transcribe_with_fallback_loads_unready_whisper_before_returning(monkeypatch):
+def test_transcribe_with_fallback_queues_unready_whisper_without_loading(monkeypatch):
     import core.config as core_config
     monkeypatch.setattr(
         core_config,
@@ -414,6 +414,8 @@ def test_transcribe_with_fallback_loads_unready_whisper_before_returning(monkeyp
             return "whisper text"
 
     broadcasts: list[dict] = []
+    requests = []
+    monkeypatch.setattr(stt_factory, "request_prepare", lambda *args, **kwargs: requests.append((args, kwargs)))
     monkeypatch.setattr(stt_factory, "get_stt_engine", lambda model_size=None, language=None: _RemoteEngine())
     monkeypatch.setattr(stt_factory, "_is_circuit_open", lambda: False)
     monkeypatch.setattr(stt_factory, "_circuit_record_failure", lambda is_timeout=False, is_auth=False: calls.__setitem__("circuit_failure", calls["circuit_failure"] + 1))
@@ -424,14 +426,14 @@ def test_transcribe_with_fallback_loads_unready_whisper_before_returning(monkeyp
 
     text = stt_factory.transcribe_with_fallback(np.zeros(16000 * 8, dtype=np.float32), 16000)
 
-    assert text == "whisper text"
-    assert calls["load"] == 1
-    assert calls["transcribe"] == 1
+    assert text == ""
+    assert calls["load"] == 0
+    assert calls["transcribe"] == 0
     assert calls["circuit_failure"] == 1
-    assert any(e.get("type") == "stt_status" and e.get("provider") == "whisper" and e.get("loading") is False for e in broadcasts)
+    assert requests == [(("base", "auto"), {"consumer": "fallback"})]
 
 
-def test_whisper_fallback_load_does_not_hold_global_engine_lock(monkeypatch):
+def test_whisper_fallback_requests_prepare_without_loading(monkeypatch):
     import core.config as core_config
 
     monkeypatch.setattr(
@@ -439,38 +441,17 @@ def test_whisper_fallback_load_does_not_hold_global_engine_lock(monkeypatch):
         "get_config",
         lambda: type("Cfg", (), {"whisper_model": "base", "whisper_language": "auto"})(),
     )
-
-    calls = {"load_saw_lock_free": False}
-
-    class _FakeWhisper:
-        def __init__(self, model_size="base", language="auto"):
-            self.model_size = model_size
-            self.language = language
-            self._loaded = False
-
-        @property
-        def is_loaded(self):
-            return self._loaded
-
-        @property
-        def is_loading(self):
-            return False
-
-        def load_model(self):
-            acquired = stt_factory._engine_lock.acquire(blocking=False)
-            if acquired:
-                stt_factory._engine_lock.release()
-                calls["load_saw_lock_free"] = True
-            self._loaded = True
-
-    monkeypatch.setattr(stt_factory, "STTEngine", _FakeWhisper)
+    monkeypatch.setattr(stt_factory, "_whisper_engines", {})
     monkeypatch.setattr(stt_factory, "_engine", None)
-    monkeypatch.setattr(stt_factory, "_whisper_preload_done", False)
+    requests = []
+    monkeypatch.setattr(stt_factory, "request_prepare", lambda *args, **kwargs: requests.append((args, kwargs)))
 
     engine = stt_factory._get_whisper_fallback()
 
-    assert engine.is_loaded is True
-    assert calls["load_saw_lock_free"] is True
+    assert engine.is_loaded is False
+    assert requests == [(("base", "auto"), {"consumer": "fallback"})]
+    assert stt_factory._engine_lock.acquire(blocking=False)
+    stt_factory._engine_lock.release()
 
 
 def test_candidate_partial_whisper_skips_when_inference_lock_busy(monkeypatch):
@@ -572,7 +553,7 @@ def test_candidate_remote_fallback_skips_whisper_when_inference_lock_busy(monkey
     assert calls["whisper"] == 0
 
 
-def test_whisper_language_cache_does_not_keep_stale_alias(monkeypatch):
+def test_whisper_language_selects_distinct_cached_instance(monkeypatch):
     import core.config as core_config
 
     cfg = type(
@@ -602,9 +583,9 @@ def test_whisper_language_cache_does_not_keep_stale_alias(monkeypatch):
     explicit_auto = stt_factory.get_stt_engine(provider="whisper", model_size="base", language="auto")
     explicit_zh = stt_factory.get_stt_engine(provider="whisper", model_size="base", language="zh")
 
-    assert explicit_zh is old_auto
+    assert explicit_zh is not old_auto
     assert explicit_zh.language == "zh"
-    assert explicit_auto is not old_auto
+    assert explicit_auto is old_auto
     assert explicit_auto.language == "auto"
 
 

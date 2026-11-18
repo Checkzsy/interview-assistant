@@ -23,6 +23,11 @@ if str(BACKEND_DIR) not in sys.path:
 pipeline = importlib.import_module("api.assist.pipeline")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_recording_group(monkeypatch):
+    monkeypatch.setattr(pipeline, "_recording_group", None)
+
+
 # ---------- 共享 fakes -------------------------------------------------------
 
 
@@ -119,6 +124,268 @@ def _wire_common_fakes(monkeypatch, audio_capture, session, *, gc_counter=None):
 
 
 # ---------- Fix 1: audio leak --------------------------------------------------
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_stopped_worker_cannot_resume_after_new_recording_starts(monkeypatch, restart):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, audio, session)
+    entered_load = threading.Event()
+    release_load = threading.Event()
+    child_threads = []
+    thread_class = threading.Thread
+
+    class _DeferredChildThread:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.started = False
+            child_threads.append(self)
+
+        def start(self):
+            self.started = True
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
+    class _BlockingEngine(_FakeEngine):
+        is_loaded = False
+
+        def load_model(self):
+            entered_load.set()
+            assert release_load.wait(timeout=2)
+            self.is_loaded = True
+
+    cfg = type("Cfg", (), {"assist_stop_answer_wait_sec": 0})()
+    monkeypatch.setattr(pipeline, "get_config", lambda: cfg)
+    monkeypatch.setattr(pipeline, "get_stt_engine", lambda: _BlockingEngine())
+    monkeypatch.setattr(pipeline, "_candidate_audio_capture", _RecordingAudioCapture())
+    monkeypatch.setattr(pipeline, "_device_is_loopback", lambda device_id: True)
+    monkeypatch.setattr(pipeline, "cancel_answer_work", lambda **kwargs: None)
+    monkeypatch.setattr(pipeline.review_integration, "on_assist_start", lambda **kwargs: None)
+    monkeypatch.setattr(pipeline.review_integration, "on_assist_stop", lambda session: None)
+
+    class _ShortJoinThread(thread_class):
+        def join(self, timeout=None):
+            super().join(timeout=min(timeout or 0.02, 0.02))
+
+    old_stop_event = pipeline._stop_event
+    old_worker = _ShortJoinThread(target=pipeline._interview_worker, daemon=True)
+    pipeline._interview_thread = old_worker
+    old_worker.start()
+    assert entered_load.wait(timeout=1)
+    monkeypatch.setattr(pipeline.threading, "Thread", _DeferredChildThread)
+
+    try:
+        pipeline.stop_interview_loop()
+        assert old_worker.is_alive(), "stop must be bounded while model loading is blocked"
+        if restart:
+            pipeline.start_nonblocking(device_id=7)
+        stop_count = len(audio.stop_calls)
+        new_threads = list(child_threads)
+        new_worker = pipeline._interview_thread
+        release_load.set()
+        thread_class.join(old_worker, timeout=2)
+
+        assert not old_worker.is_alive()
+        assert session.is_recording is restart
+        assert audio.is_running is restart
+        if restart:
+            assert len(audio.stop_calls) == stop_count
+        assert child_threads == new_threads
+        assert pipeline._interview_thread is new_worker
+        if restart:
+            new_group = pipeline._recording_group
+            assert new_group.stop_event is not old_stop_event
+            assert old_stop_event.is_set()
+            assert not new_group.stop_event.is_set()
+            assert new_worker.kwargs["args"] == (new_group,)
+    finally:
+        pipeline._stop_event.set()
+        release_load.set()
+        thread_class.join(old_worker, timeout=2)
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_late_interviewer_asr_result_is_discarded_after_stop(monkeypatch, restart):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, audio, session)
+    entered_infer = threading.Event()
+    release_infer = threading.Event()
+    published = []
+    events = []
+    cfg = type("Cfg", (), {"position": "", "language": "zh", "transcription_min_sig_chars": 1})()
+    monkeypatch.setattr(pipeline, "get_config", lambda: cfg)
+    monkeypatch.setattr(pipeline, "broadcast", events.append)
+    monkeypatch.setattr(pipeline, "_append_transcription_fragment", lambda *args: published.append(args))
+
+    def transcribe(*args, **kwargs):
+        entered_infer.set()
+        assert release_infer.wait(timeout=2)
+        return "旧会话晚到的问题"
+
+    monkeypatch.setattr(pipeline, "transcribe_with_fallback", transcribe)
+    group = pipeline._current_recording_group()
+    runtime = pipeline._new_interviewer_runtime()
+    group.runtime = runtime
+    runtime.drain_event.set()
+    runtime.segment_queue.put(pipeline.InterviewerSegment(
+        audio=np.zeros(8000), sample_rate=16000, started_mono=0, ended_mono=0,
+        audio_sec=0.5, flush_reason="silence", capture_is_loopback=True,
+    ))
+    worker = threading.Thread(target=pipeline._interviewer_asr_worker, args=(runtime, session, cfg, group), daemon=True)
+    worker.start()
+    assert entered_infer.wait(timeout=1)
+    group.stop_event.set()
+    group.accept_results = False
+    if restart:
+        monkeypatch.setattr(pipeline, "_recording_group", pipeline._RecordingGroup())
+    events.clear()
+    release_infer.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert published == []
+    assert events == []
+
+
+
+def test_late_candidate_asr_cannot_publish_or_stop_new_capture(monkeypatch):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, _RecordingAudioCapture(), session)
+    _wire_candidate_fakes(monkeypatch, audio, session)
+    entered_infer = threading.Event()
+    release_infer = threading.Event()
+    published = []
+    chunks = [np.ones(8000, dtype=np.float32)]
+
+    class _CandidateVAD:
+        has_pending_audio = False
+
+        def __init__(self, **kwargs):
+            pass
+
+        def feed(self, chunk):
+            return np.ones(8000, dtype=np.float32)
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr(pipeline, "VADBuffer", _CandidateVAD)
+    monkeypatch.setattr(audio, "drain_audio_chunks", lambda **kwargs: [chunks.pop()] if chunks else [])
+    monkeypatch.setattr(pipeline, "_publish_candidate_transcription", lambda *args, **kwargs: published.append(args))
+
+    def transcribe(*args, **kwargs):
+        entered_infer.set()
+        assert release_infer.wait(timeout=2)
+        return "候选人旧回答"
+
+    monkeypatch.setattr(pipeline, "transcribe_with_fallback", transcribe)
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args: object())
+    group = pipeline._current_recording_group()
+    worker = threading.Thread(target=pipeline._candidate_worker, args=(group,), daemon=True)
+    worker.start()
+    assert entered_infer.wait(timeout=1)
+    group.stop_event.set()
+    group.accept_results = False
+    new_group = pipeline._RecordingGroup()
+    monkeypatch.setattr(pipeline, "_recording_group", new_group)
+    audio._is_running = True
+    release_infer.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert published == []
+    assert audio.stop_calls == []
+    assert audio.is_running is True
+
+
+def test_old_flush_worker_cannot_flush_new_group(monkeypatch):
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, _RecordingAudioCapture(), session)
+    group = pipeline._current_recording_group()
+    group.flush_queue.put((object(), session, time.monotonic()))
+    flushed = []
+    monkeypatch.setattr(pipeline, "_try_flush_asr_merge_buffer", lambda *args: flushed.append(args))
+    monkeypatch.setattr(pipeline, "_try_flush_asr_question_group", lambda *args: flushed.append(args))
+    monkeypatch.setattr(pipeline, "_recording_group", pipeline._RecordingGroup())
+
+    pipeline._flush_worker(group)
+
+    assert flushed == []
+    assert group.flush_queue.qsize() == 1
+
+
+def test_candidate_initialization_failure_releases_capture(monkeypatch):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, _RecordingAudioCapture(), session)
+    monkeypatch.setattr(pipeline, "_candidate_audio_capture", audio)
+
+    def invalid_config():
+        raise RuntimeError("configuration unavailable")
+
+    monkeypatch.setattr(pipeline, "get_config", invalid_config)
+    pipeline._candidate_worker()
+
+    assert audio.stop_calls == ["assist-candidate"]
+
+
+def test_main_worker_requests_prepare_without_calling_load_model(monkeypatch):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, audio, session)
+    requests = []
+    events = []
+
+    class _UnreadyEngine(_FakeEngine):
+        is_loaded = False
+
+        def load_model(self):
+            raise AssertionError("recording worker must not load/download")
+
+    monkeypatch.setattr(pipeline, "get_stt_engine", lambda: _UnreadyEngine())
+    monkeypatch.setattr(pipeline, "request_prepare", lambda *args, **kwargs: requests.append((args, kwargs)) or {"phase": "error", "error": "download failed"}, raising=False)
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args: None, raising=False)
+    monkeypatch.setattr(pipeline, "_preparation_lane_active", lambda: True)
+    monkeypatch.setattr(pipeline, "broadcast", events.append)
+    monkeypatch.setattr(pipeline, "get_config", lambda: type("Cfg", (), {"stt_provider": "whisper", "whisper_model": "medium", "whisper_language": "zh"})())
+    audio._chunk_provider = lambda: pipeline._stop_event.set()
+
+    pipeline._interview_worker()
+
+    assert requests == [(("medium", "zh"), {"consumer": "main"})]
+    assert not any(event.get("type") == "error" for event in events)
+
+
+@pytest.mark.parametrize("provider", ["whisper", "generic"])
+def test_interviewer_unready_local_skips_inference_but_remote_still_runs(monkeypatch, provider):
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, _RecordingAudioCapture(), session)
+    cfg = type("Cfg", (), {"stt_provider": provider, "position": "", "language": "zh"})()
+    runtime = pipeline._new_interviewer_runtime()
+    runtime.segment_queue.put(pipeline.InterviewerSegment(
+        audio=np.zeros(8000), sample_rate=16000, started_mono=0, ended_mono=0,
+        audio_sec=0.5, flush_reason="silence", capture_is_loopback=True,
+    ))
+    runtime.drain_event.set()
+    calls = []
+    monkeypatch.setattr(pipeline, "get_config", lambda: cfg)
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args: None, raising=False)
+    monkeypatch.setattr(pipeline, "_preparation_lane_active", lambda: True)
+    monkeypatch.setattr(pipeline, "transcribe_with_fallback", lambda *args, **kwargs: calls.append(kwargs) or "")
+
+    pipeline._interviewer_asr_worker(runtime, session, cfg)
+
+    assert len(calls) == (0 if provider == "whisper" else 1)
+    assert runtime.segment_queue.unfinished_tasks == 0
+
 
 
 def test_worker_normal_exit_calls_audio_stop(monkeypatch):
@@ -259,35 +526,39 @@ def test_gc_daemon_thread_terminates_when_worker_exits(monkeypatch):
 # ---------- 兜底: 仅供 sanity ------------------------------------------------
 
 
-def test_worker_stop_on_load_failure_does_not_call_audio_stop(monkeypatch):
-    """模型加载失败的早退路径不会进入 try 块, audio_capture 也没 start 过,
-    因此不应误调 stop (避免与外部 stop 顺序竞争)."""
-
+def test_worker_initialization_failure_releases_capture(monkeypatch):
+    """start 已启动 capture，初始化异常也必须进入本组 finally。"""
     audio = _RecordingAudioCapture()
     session = _FakeSession()
+    _wire_common_fakes(monkeypatch, audio, session)
 
-    class _BrokenEngine:
-        is_loaded = False
+    def broken_engine():
+        raise RuntimeError("model initialization failed")
 
-        def load_model(self):
-            raise RuntimeError("model load failed")
-
-    monkeypatch.setattr(pipeline, "audio_capture", audio)
-    monkeypatch.setattr(pipeline, "get_stt_engine", lambda: _BrokenEngine())
-    monkeypatch.setattr(pipeline, "get_session", lambda: session)
-    monkeypatch.setattr(pipeline, "broadcast", lambda *a, **kw: None)
-
+    monkeypatch.setattr(pipeline, "get_stt_engine", broken_engine)
     pipeline._interview_worker()
 
-    # 早退路径没有 try/finally 保护, audio.stop 不会从 worker 内部触发
-    # (外部 stop_interview_loop 自己会调). 这条用例锁定行为, 防止以后
-    # "保险起见" 在错误路径乱加 stop 反而干扰外部 owner 一致性。
-    assert audio.stop_calls == [], (
-        f"模型加载失败的早退路径不应调用 audio.stop; 实际 stop_calls={audio.stop_calls}"
-    )
+    assert audio.stop_calls == ["assist"]
+    assert session.is_recording is False
 
 
 # ---------- Written exam mode: start without audio ---------------------------
+
+
+def test_stop_releases_candidate_prepare_consumer(monkeypatch):
+    audio = _RecordingAudioCapture()
+    session = _FakeSession()
+    _wire_common_fakes(monkeypatch, audio, session)
+    released = []
+    monkeypatch.setattr(pipeline, "release_prepare_consumer", released.append, raising=False)
+    monkeypatch.setattr(pipeline, "cancel_answer_work", lambda **_kwargs: None)
+    monkeypatch.setattr(pipeline.review_integration, "on_assist_stop", lambda _session: None)
+    monkeypatch.setattr(pipeline, "get_config", lambda: type("Cfg", (), {"written_exam_mode": True, "assist_stop_answer_wait_sec": 0})())
+
+    pipeline.start_nonblocking(device_id=None)
+    pipeline.stop_interview_loop()
+
+    assert "candidate" in released
 
 
 def test_start_nonblocking_skips_audio_in_exam_mode(monkeypatch):
@@ -983,6 +1254,7 @@ def test_candidate_worker_does_not_crash_on_flushed_segment_in_drain_batch(monke
         "_publish_candidate_transcription",
         lambda _session, text, *_a, **_kw: published.append(text),
     )
+    monkeypatch.setattr(pipeline, "get_ready", lambda *args: object())
 
     # worker 是 while not _stop_event; 上面 drain 在第一轮就 set 了 stop 且 batch 内
     # 含一次 flush。修复前 `or` 在 flush 段上抛 ValueError, worker 崩溃, publish 为空。

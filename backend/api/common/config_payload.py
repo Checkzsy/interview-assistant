@@ -1,4 +1,4 @@
-from core.config import model_health_fingerprint
+from core.config import model_health_fingerprint, stt_config_fingerprint
 from services.storage.resume_history import get_filename_for_id
 
 
@@ -6,6 +6,7 @@ def build_config_payload(cfg) -> dict:
     active_model = cfg.get_active_model()
     resume_active_history_id = getattr(cfg, "resume_active_history_id", None)
     return {
+        "stt_config_version": stt_config_fingerprint(cfg),
         "models": [
             {
                 "name": model.name,

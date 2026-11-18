@@ -19,11 +19,18 @@ from core.auth import (
     origin_allows_loopback_bypass,
     verify_token,
 )
-from core.config import get_config
+from core.config import get_config, stt_config_fingerprint
 from core.env import env_int
 from core.runtime_paths import frontend_dist
 from core.logger import setup_logging, get_logger
 from services.stt import get_stt_engine
+from services.stt.factory import (
+    get_preparation_snapshot,
+    init_preparation_lane,
+    preload_whisper_fallback,
+    request_prepare,
+    shutdown_preparation_lane,
+)
 from api.realtime import ws
 from api import common, assist, analytics, resume, jobs, review, mock_interview
 from api import kb as kb_api
@@ -87,6 +94,7 @@ async def lifespan(app: FastAPI):
     ws.init_broadcast(loop, queue)
     dispatch_task = asyncio.create_task(ws.ws_dispatcher())
     heartbeat_task = asyncio.create_task(ws.ws_heartbeat())
+    init_preparation_lane(_publish_stt_preparation)
     assist.init_background_workers()
     # 实时翻译 worker：ASR 转录广播后投递翻译，翻译失败不阻塞录音/答题主流程。
     assist.init_translate_worker(ws.broadcast)
@@ -103,8 +111,72 @@ async def lifespan(app: FastAPI):
     assist.stop_interview_loop()
     assist.shutdown_background_workers()
     assist.stop_translate_worker()
+    shutdown_preparation_lane()
     dispatch_task.cancel()
     heartbeat_task.cancel()
+
+
+def _publish_stt_preparation(event: dict) -> None:
+    """Bridge lane events to WS: one authoritative snapshot plus legacy roles."""
+    preparation = get_preparation_snapshot()
+    if preparation.get("runtime_id") is None or event.get("runtime_id") != preparation["runtime_id"]:
+        return
+    cfg = get_config()
+    ws.broadcast({
+        "type": "stt_preparation",
+        "config_version": stt_config_fingerprint(cfg),
+        "preparation": preparation,
+    })
+    roles = event.get("roles") or []
+    key = tuple(event.get("key") or [])
+    main_key = (cfg.whisper_model or "base", cfg.whisper_language or "auto")
+    # The event may have been captured before a newer phase was committed
+    # (events are delivered outside the lane lock). Read the authoritative
+    # state so a delayed frame cannot downgrade legacy readiness.
+    current = next(
+        (state for state in preparation.get("states") or [] if tuple(state.get("key") or []) == key),
+        None,
+    )
+    phase = (current or event).get("phase")
+    terminal = phase in ("ready", "error")
+    loaded = phase == "ready"
+    if "main" in roles and cfg.stt_provider == "whisper" and key == main_key:
+        ws.broadcast({
+            "type": "stt_status",
+            "loaded": loaded,
+            "loading": not terminal,
+            "provider": "whisper",
+        })
+    candidate_provider = cfg.candidate_stt_provider or "whisper"
+    if candidate_provider in ("doubao", "generic") and not cfg.candidate_remote_stt_enabled:
+        candidate_provider = "whisper"
+    candidate_key = (
+        cfg.candidate_whisper_model or main_key[0],
+        cfg.candidate_whisper_language or main_key[1],
+    )
+    if (
+        "candidate" in roles and cfg.candidate_asr_enabled
+        and candidate_provider == "whisper" and key == candidate_key
+    ):
+        # A model download failure is not a microphone failure: never forward
+        # the error into the candidate/mic channel.
+        ws.broadcast({
+            "type": "candidate_asr_status",
+            "loaded": loaded,
+            "loading": not terminal,
+            "provider": "whisper",
+        })
+    if (
+        "fallback" in roles and terminal and cfg.stt_provider != "whisper"
+        and cfg.whisper_preload and key == main_key
+    ):
+        ws.broadcast({
+            "type": "stt_status",
+            "provider": "whisper-preload",
+            "loaded": loaded,
+            "loading": False,
+            "error": event.get("error"),
+        })
 
 
 def _preload_stt():
@@ -118,20 +190,22 @@ def _preload_stt():
         _log.debug("Whisper cache prune skipped: %s", e)
     try:
         cfg = get_config()
-        engine = get_stt_engine()
         _log.info("STT preload start provider=%s", cfg.stt_provider)
-        is_remote = cfg.stt_provider in ("doubao", "generic")
-        if not is_remote:
+        if cfg.stt_provider in ("doubao", "generic"):
+            # 远程主识别照常工作；whisper_preload 只决定是否预取降级模型。
+            engine = get_stt_engine()
+            ws.broadcast({"type": "stt_status", "loaded": bool(engine.is_loaded), "loading": False, "provider": cfg.stt_provider})
+        else:
             ws.broadcast({"type": "stt_status", "loaded": False, "loading": True, "provider": cfg.stt_provider})
-        engine.load_model()
-        loaded = bool(engine.is_loaded) if not is_remote else True
-        _log.info("STT preload done provider=%s loaded=%s", cfg.stt_provider, loaded)
-        ws.broadcast({"type": "stt_status", "loaded": loaded, "loading": False, "provider": cfg.stt_provider})
+            request_prepare(
+                cfg.whisper_model or "base",
+                cfg.whisper_language or "auto",
+                consumer="main",
+            )
     except Exception as e:
         _log.error("STT preload failed: %s", e, exc_info=True)
         ws.broadcast({"type": "stt_status", "loaded": False, "loading": False, "provider": get_config().stt_provider, "error": str(e)})
     try:
-        from services.stt.factory import preload_whisper_fallback
         preload_whisper_fallback()
     except Exception as e:
         _log.debug("Whisper fallback preload skipped: %s", e)

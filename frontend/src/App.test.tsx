@@ -190,6 +190,91 @@ describe('App bootstrap', () => {
     })
   })
 
+  it('shows model preparation progress in the status chip instead of a silent "loading"', async () => {
+    apiMock.getConfig.mockResolvedValue({
+      models: [{ name: 'demo', supports_vision: false }],
+      active_model: 0,
+      api_key_set: true,
+      think_mode: false,
+      think_effort: 'off',
+      stt_provider: 'whisper',
+      whisper_model: 'medium',
+      whisper_language: 'zh',
+    })
+    useInterviewStore.setState({
+      sttLoaded: false,
+      sttLoading: true,
+      sttPreparation: {
+        runtime_id: 'rt-1',
+        revision: 3,
+        active: null,
+        pending: [],
+        states: [
+          {
+            key: ['medium', 'zh'],
+            attempt_id: 'a1',
+            phase: 'downloading',
+            downloaded_bytes: 458_400_000,
+            total_bytes: 1_528_000_000,
+            progress: 30,
+            started_at: 1,
+            updated_at: 2,
+            error: null,
+            roles: ['main'],
+          },
+        ],
+      },
+    } as any)
+
+    render(<App />)
+
+    expect(await screen.findByText('正在下载模型 30%')).toBeInTheDocument()
+  })
+
+  it('keeps the header silent for another consumer role and for a ready main model', async () => {
+    apiMock.getConfig.mockResolvedValue({
+      models: [{ name: 'demo', supports_vision: false }],
+      active_model: 0,
+      api_key_set: true,
+      think_mode: false,
+      think_effort: 'off',
+      stt_provider: 'whisper',
+      whisper_model: 'medium',
+      whisper_language: 'zh',
+    })
+    const base = {
+      key: ['medium', 'zh'],
+      attempt_id: 'a1',
+      downloaded_bytes: 10,
+      total_bytes: 100,
+      progress: 10,
+      started_at: 1,
+      updated_at: 2,
+      error: null,
+    }
+    useInterviewStore.setState({
+      sttLoaded: false,
+      sttLoading: true,
+      sttPreparation: {
+        runtime_id: 'rt-1',
+        revision: 3,
+        active: null,
+        pending: [],
+        states: [
+          { ...base, phase: 'downloading', roles: ['candidate'] },
+          { ...base, key: ['small', 'zh'], phase: 'downloading', roles: ['main'] },
+        ],
+      },
+    } as any)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('加载中')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/正在下载模型/)).not.toBeInTheDocument()
+  })
+
   it('surfaces model health detail in the priority model tooltip', async () => {
     useInterviewStore.setState({
       modelHealth: { 0: 'error' },

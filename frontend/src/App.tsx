@@ -8,8 +8,10 @@ import { useInterviewWS } from '@/hooks/useInterviewWS'
 import { useAppBootstrap } from '@/hooks/useAppBootstrap'
 import { useOverlayWindowSync } from '@/hooks/useOverlayWindowSync'
 import { useAssistSplit } from '@/hooks/useAssistSplit'
+import { useSttPreparationSync } from '@/hooks/useSttPreparationSync'
 import { api } from '@/lib/api'
 import { updateConfigAndRefresh } from '@/lib/configSync'
+import { describeMainSttPreparation } from '@/components/settings/sttPreparationDisplay'
 import TranscriptionPanel from '@/components/TranscriptionPanel'
 import AnswerPanel from '@/components/AnswerPanel'
 import ControlBar from '@/components/ControlBar'
@@ -49,6 +51,8 @@ export default function App() {
   const sttLoading = useInterviewStore((s) => s.sttLoading)
   const sttActiveProvider = useInterviewStore((s) => s.sttActiveProvider)
   const sttFallbackLoaded = useInterviewStore((s) => s.sttFallbackLoaded)
+  const sttPreparation = useInterviewStore((s) => s.sttPreparation)
+  const sttPrepDisplay = describeMainSttPreparation(sttPreparation, config)
   const isRecording = useInterviewStore((s) => s.isRecording)
   const isPaused = useInterviewStore((s) => s.isPaused)
   const currentStreamingId = useInterviewStore((s) => s.currentStreamingId)
@@ -231,6 +235,10 @@ export default function App() {
   const toasts = useInterviewStore((s) => s.toasts)
   const dismissToast = useInterviewStore((s) => s.dismissToast)
   const wsIsLeader = useInterviewStore((s) => s.wsIsLeader)
+  const wsConnected = useInterviewStore((s) => s.wsConnected)
+  // Only the leader tab receives preparation increments; the others (and a
+  // reconnecting leader) keep the same chip truthful from the status snapshot.
+  useSttPreparationSync(!wsIsLeader || !wsConnected)
   const currentAppModeLabel = APP_MODE_TABS.find(([key]) => key === appMode)?.[1] ?? '模块'
 
   useEffect(() => {
@@ -373,6 +381,8 @@ export default function App() {
               title={
                 isExamMode
                   ? '笔试模式 · 等待提问'
+                  : sttPrepDisplay
+                  ? sttPrepDisplay.detail ? `${sttPrepDisplay.label} · ${sttPrepDisplay.detail}` : sttPrepDisplay.label
                   : sttLoaded
                   ? sttActiveProvider === 'whisper' ? 'STT 已降级至 Whisper · 等待录音' : sttFallbackLoaded ? 'STT 就绪 · Whisper 降级已预加载' : 'STT 就绪 · 等待录音'
                   : sttLoading
@@ -380,9 +390,9 @@ export default function App() {
                   : 'STT 模型尚未加载,首次录音时会自动加载'
               }
             >
-              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sttLoaded ? (sttActiveProvider === 'whisper' ? 'bg-accent-amber' : 'bg-accent-green') : sttLoading ? 'bg-accent-amber animate-pulse' : 'bg-accent-red'}`} />
+              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sttPrepDisplay ? (sttPrepDisplay.kind === 'error' ? 'bg-accent-red' : 'bg-accent-amber animate-pulse') : sttLoaded ? (sttActiveProvider === 'whisper' ? 'bg-accent-amber' : 'bg-accent-green') : sttLoading ? 'bg-accent-amber animate-pulse' : 'bg-accent-red'}`} />
               <span className="text-[10px] text-text-muted hidden md:inline font-medium">
-                {sttLoaded ? (sttActiveProvider === 'whisper' ? 'Whisper' : sttFallbackLoaded ? 'STT ✓' : 'STT 就绪') : sttLoading ? '加载中' : '未加载'}
+                {sttPrepDisplay ? sttPrepDisplay.label : sttLoaded ? (sttActiveProvider === 'whisper' ? 'Whisper' : sttFallbackLoaded ? 'STT ✓' : 'STT 就绪') : sttLoading ? '加载中' : '未加载'}
               </span>
             </div>
           )}

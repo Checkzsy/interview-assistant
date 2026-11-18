@@ -37,6 +37,45 @@ def normalize_llm_max_tokens(value: Any) -> int:
     parsed = _finite_number(value, DEFAULT_MAX_TOKENS)
     return max(256, min(32768, int(parsed)))
 
+_STT_FINGERPRINT_FIELDS = (
+    "stt_provider",
+    "whisper_model",
+    "whisper_language",
+    "whisper_preload",
+    "doubao_stt_app_id",
+    "doubao_stt_access_token",
+    "doubao_stt_api_key",
+    "doubao_stt_resource_id",
+    "doubao_stt_boosting_table_id",
+    "generic_stt_api_base_url",
+    "generic_stt_api_key",
+    "generic_stt_model",
+    "generic_stt_custom_headers",
+    "candidate_asr_enabled",
+    "candidate_stt_provider",
+    "candidate_whisper_model",
+    "candidate_whisper_language",
+    "candidate_remote_stt_enabled",
+)
+
+
+def stt_config_fingerprint(cfg: Any) -> str:
+    """Return a process-local opaque identity for the STT selection.
+
+    Credentials participate so saving new ones invalidates pending tests, but
+    the key itself is never exposed; unrelated config edits do not change it.
+    """
+
+    payload = "\x1f".join(
+        str(getattr(cfg, field, "") or "") for field in _STT_FINGERPRINT_FIELDS
+    ).encode("utf-8", errors="surrogatepass")
+    return hmac.new(
+        _MODEL_HEALTH_FINGERPRINT_KEY,
+        payload,
+        hashlib.sha256,
+    ).hexdigest()[:24]
+
+
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.environ.get("IA_CONFIG_PATH") or os.path.join(_BACKEND_DIR, "config.json")
 CONFIG_EXAMPLE = os.path.join(_BACKEND_DIR, "config.example.json")

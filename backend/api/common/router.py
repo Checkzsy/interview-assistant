@@ -13,12 +13,22 @@ from core.auth import get_token, is_auth_disabled, is_loopback_host
 from core.config import (
     get_config, update_config,
     POSITION_OPTIONS, LANGUAGE_OPTIONS, WHISPER_MODEL_OPTIONS, STT_PROVIDER_OPTIONS,
-    SCREEN_CAPTURE_REGION_OPTIONS,
+    SCREEN_CAPTURE_REGION_OPTIONS, stt_config_fingerprint,
     normalize_llm_max_tokens, normalize_llm_temperature,
 )
 from core.env import env_int
 from services.audio import AudioCapture
-from services.stt import get_stt_engine, set_whisper_language
+from services.stt import get_stt_engine
+from services.stt.engines import STTEngine
+from services.stt.factory import (
+    WhisperInferenceBusy,
+    get_preparation_snapshot,
+    get_ready,
+    preload_whisper_fallback,
+    release_prepare_consumer,
+    request_prepare,
+    transcribe_whisper_for_test,
+)
 from api.common.config_payload import build_config_payload
 from api.common.model_health import (
     get_model_health,
@@ -38,6 +48,7 @@ from services.storage.resume_history import (
 )
 
 router = APIRouter()
+_stt_test_lock = threading.Lock()
 
 # 简历上传阈值从 services.storage.resume_history 引入 (单一来源 / DRY)。
 # Router 层做流式校验是为了在拿到 Content-Length 或读到超限时立即拒绝,
@@ -46,6 +57,15 @@ _RESUME_UPLOAD_CHUNK = 1 * 1024 * 1024
 
 def _has_enabled_model(models: list) -> bool:
     return any(bool(getattr(model, "enabled", True)) for model in models)
+
+
+class SttTestRequest(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    language: Optional[str] = None
+    config_version: Optional[str] = None
+    attempt_id: Optional[str] = None
+    retry: bool = False
 
 
 class ConfigUpdate(BaseModel):
@@ -417,15 +437,42 @@ async def api_update_config(body: ConfigUpdate):
         raise
     except (TypeError, ValueError, ValidationError) as e:
         raise HTTPException(400, str(e)) from e
-    if body.whisper_language is not None:
-        set_whisper_language(body.whisper_language)
-    if body.whisper_model is not None:
-        engine = get_stt_engine()
-        new_model = body.whisper_model
-        if hasattr(engine, "change_model"):
-            threading.Thread(target=lambda: engine.change_model(new_model), daemon=True).start()
+    _reconcile_stt_preparation(get_config())
     # 返回更新后的完整配置，而不是简单的 {ok: True}
     return build_config_payload(get_config())
+
+
+def _reconcile_stt_preparation(cfg) -> None:
+    """Point the managed preparation lane at the saved selection; never load here."""
+    if getattr(cfg, "stt_provider", "whisper") == "whisper":
+        release_prepare_consumer("fallback")
+        request_prepare(
+            getattr(cfg, "whisper_model", "base") or "base",
+            getattr(cfg, "whisper_language", "auto") or "auto",
+            consumer="main",
+        )
+    else:
+        release_prepare_consumer("main")
+        if getattr(cfg, "whisper_preload", False):
+            preload_whisper_fallback()
+        else:
+            release_prepare_consumer("fallback")
+    if not bool(getattr(cfg, "candidate_asr_enabled", False)):
+        release_prepare_consumer("candidate")
+        return
+    candidate_provider = getattr(cfg, "candidate_stt_provider", "whisper") or "whisper"
+    if candidate_provider in ("doubao", "generic") and not bool(
+        getattr(cfg, "candidate_remote_stt_enabled", False)
+    ):
+        candidate_provider = "whisper"
+    if candidate_provider != "whisper":
+        release_prepare_consumer("candidate")
+        return
+    request_prepare(
+        getattr(cfg, "candidate_whisper_model", "") or getattr(cfg, "whisper_model", "base") or "base",
+        getattr(cfg, "candidate_whisper_language", "") or getattr(cfg, "whisper_language", "auto") or "auto",
+        consumer="candidate",
+    )
 
 
 @router.get("/network-info")
@@ -575,11 +622,35 @@ async def api_resume_history_delete(entry_id: int):
 
 @router.get("/stt/status")
 async def api_stt_status():
+    # Snapshot locking and engine lookups stay off the event loop; only the
+    # async test/stop paths must remain responsive under a slow model lock.
+    return await run_in_threadpool(_stt_status_payload)
+
+
+def _stt_status_payload():
+    cfg = get_config()
+    version = stt_config_fingerprint(cfg)
+    preparation = get_preparation_snapshot()
     try:
         engine = get_stt_engine()
-        return {"loaded": engine.is_loaded, "loading": engine.is_loading, "model": engine.model_size}
+        return {
+            "loaded": engine.is_loaded,
+            "loading": engine.is_loading,
+            "model": engine.model_size,
+            "provider": cfg.stt_provider,
+            "config_version": version,
+            "preparation": preparation,
+        }
     except Exception as e:
-        return {"loaded": False, "loading": False, "model": get_config().stt_provider, "detail": str(e)[:200]}
+        return {
+            "loaded": False,
+            "loading": False,
+            "model": cfg.stt_provider,
+            "provider": cfg.stt_provider,
+            "config_version": version,
+            "preparation": preparation,
+            "detail": str(e)[:200],
+        }
 
 
 @router.post("/models/health")
@@ -636,9 +707,18 @@ async def api_probe_single_model(index: int):
 
 
 @router.post("/stt/test")
-async def api_stt_test():
-    """Test current STT engine connectivity with credential pre-checks."""
+async def api_stt_test(body: Optional[SttTestRequest] = None):
+    """Test the saved STT selection.
+
+    A bare POST keeps the legacy synchronous response. A body opts into the
+    staged protocol: capture identity before awaiting, never hold the event
+    loop for a download, and only transcribe once the target is ready.
+    """
     cfg = get_config()
+    version = stt_config_fingerprint(cfg)
+    protocol = body is not None
+    if protocol and body.provider is not None and body.provider != cfg.stt_provider:
+        return {"ok": False, "stale": True, "config_version": version, "detail": "STT 配置已变更，请重新保存后测试"}
     if cfg.stt_provider == "iflytek":
         return {"ok": False, "detail": "讯飞 STT 已下线，请改为通用 ASR 或 Whisper"}
     if cfg.stt_provider == "doubao":
@@ -656,22 +736,169 @@ async def api_stt_test():
             return {"ok": False, "detail": "通用 ASR API Key 未配置"}
         if not getattr(cfg, "generic_stt_model", ""):
             return {"ok": False, "detail": "通用 ASR Model 未配置"}
+    if not protocol:
+        return await _legacy_stt_test()
+
+    if body.config_version is not None and body.config_version != version:
+        return {"ok": False, "stale": True, "config_version": version, "detail": "STT 配置已变更，请重新保存后测试"}
+    snapshot = get_preparation_snapshot()
+    whisper_target: Optional[tuple[str, str]] = None
+    engine = None
+    if cfg.stt_provider == "whisper":
+        configured = (
+            getattr(cfg, "whisper_model", "base") or "base",
+            getattr(cfg, "whisper_language", "auto") or "auto",
+        )
+        if (body.model is not None and body.model != configured[0]) or (
+            body.language is not None and body.language != configured[1]
+        ):
+            return {"ok": False, "stale": True, "config_version": version, "detail": "STT 配置已变更，请重新保存后测试"}
+        whisper_target = (body.model or configured[0], body.language or configured[1])
+    if body.attempt_id and body.attempt_id not in {
+        state.get("attempt_id") for state in snapshot.get("states") or []
+        if tuple(state.get("key") or []) == whisper_target
+    }:
+        return {"ok": False, "stale": True, "config_version": version, "detail": "准备任务已被替换，请重试"}
+    if whisper_target is not None:
+        state = request_prepare(*whisper_target, consumer="main", retry=body.retry) or {}
+        engine = get_ready(*whisper_target)
+        if engine is None and state.get("phase") in {"error", "uninitialized"}:
+            return {
+                "ok": False,
+                "pending": False,
+                "config_version": version,
+                "state": state,
+                "detail": str(state.get("error") or "模型准备失败，请重试")[:200],
+            }
+        if engine is None:
+            return {
+                "ok": False,
+                "pending": True,
+                "config_version": version,
+                "attempt_id": state.get("attempt_id"),
+                "state": state,
+            }
+    else:
+        try:
+            engine = get_stt_engine(provider=cfg.stt_provider)
+        except Exception as e:
+            return {"ok": False, "detail": str(e)[:200], "config_version": version}
+
+    if not _stt_test_lock.acquire(blocking=False):
+        return {
+            "ok": False,
+            "busy": True,
+            "reason": "admission_busy",
+            "detail": "STT 测试繁忙，请等待当前测试结束后重试",
+            "config_version": version,
+        }
+
+    state_lock = threading.Lock()
+    started = False
+    cancelled = False
+
+    def _run_test():
+        nonlocal started
+        with state_lock:
+            if cancelled:
+                return
+            started = True
+        try:
+            from services.audio import load_wav_file
+            wav_path = Path(__file__).resolve().parents[2] / "assets" / "preflight_phrase.wav"
+            if wav_path.exists():
+                audio, sr = load_wav_file(wav_path)
+            else:
+                import numpy as _np
+                sr = 16000
+                audio = _np.zeros(int(sr * 1.5), dtype=_np.float32)
+            if whisper_target is not None:
+                result = transcribe_whisper_for_test(engine, audio, sr, timeout=2.0)
+            else:
+                result = engine.transcribe(audio, sample_rate=sr)
+            if not (result or "").strip():
+                return {"ok": False, "detail": "引擎返回空文本，请检查接口兼容性或模型配置", "config_version": version}
+            return {"ok": True, "text": result, "config_version": version}
+        except WhisperInferenceBusy:
+            return {
+                "ok": False,
+                "busy": True,
+                "reason": "inference_busy",
+                "detail": "Whisper 正在为实时识别推理，请稍后重试",
+                "config_version": version,
+            }
+        finally:
+            _stt_test_lock.release()
+
+    try:
+        return await run_in_threadpool(_run_test)
+    except BaseException as e:
+        # A cancelled, not-yet-started worker must not run after returning its
+        # slot. Running workers keep the slot until their own finally above.
+        with state_lock:
+            if not started:
+                cancelled = True
+                _stt_test_lock.release()
+        if isinstance(e, Exception):
+            return {"ok": False, "detail": str(e)[:200], "config_version": version}
+        raise
+
+
+async def _legacy_stt_test():
+    if not _stt_test_lock.acquire(blocking=False):
+        return {"ok": False, "detail": "STT 测试繁忙，请等待当前测试结束后重试"}
+
     try:
         engine = get_stt_engine()
-        from services.audio import load_wav_file
-        wav_path = Path(__file__).resolve().parents[2] / "assets" / "preflight_phrase.wav"
-        if wav_path.exists():
-            audio, sr = load_wav_file(wav_path)
-        else:
-            import numpy as _np
-            sr = 16000
-            audio = _np.zeros(int(sr * 1.5), dtype=_np.float32)
-        result = engine.transcribe(audio, sample_rate=sr)
-        if not (result or "").strip():
-            return {"ok": False, "detail": "引擎返回空文本，请检查接口兼容性或模型配置"}
-        return {"ok": True, "text": result}
-    except Exception as e:
-        return {"ok": False, "detail": str(e)[:200]}
+    except BaseException as e:
+        # Engine construction failed before any transcription started; the slot
+        # was never handed to a worker, so return it here, including cancellation.
+        _stt_test_lock.release()
+        if isinstance(e, Exception):
+            return {"ok": False, "detail": str(e)[:200]}
+        raise
+
+    state_lock = threading.Lock()
+    started = False
+    cancelled = False
+
+    def _run_test():
+        nonlocal started
+        with state_lock:
+            if cancelled:
+                return
+            started = True
+        try:
+            from services.audio import load_wav_file
+            wav_path = Path(__file__).resolve().parents[2] / "assets" / "preflight_phrase.wav"
+            if wav_path.exists():
+                audio, sr = load_wav_file(wav_path)
+            else:
+                import numpy as _np
+                sr = 16000
+                audio = _np.zeros(int(sr * 1.5), dtype=_np.float32)
+            if isinstance(engine, STTEngine):
+                result = transcribe_whisper_for_test(engine, audio, sr)
+            else:
+                result = engine.transcribe(audio, sample_rate=sr)
+            if not (result or "").strip():
+                return {"ok": False, "detail": "引擎返回空文本，请检查接口兼容性或模型配置"}
+            return {"ok": True, "text": result}
+        finally:
+            _stt_test_lock.release()
+
+    try:
+        return await run_in_threadpool(_run_test)
+    except BaseException as e:
+        # A cancelled, not-yet-started worker must not run after returning its
+        # slot. Running workers keep the slot until their own finally above.
+        with state_lock:
+            if not started:
+                cancelled = True
+                _stt_test_lock.release()
+        if isinstance(e, Exception):
+            return {"ok": False, "detail": str(e)[:200]}
+        raise
 
 
 @router.get("/token/stats")

@@ -3,6 +3,59 @@ import { getAuthToken } from './auth'
 
 const BACKEND_UNREACHABLE_MESSAGE = '无法连接后端服务，请确认应用服务已启动后重试'
 
+export interface SttTestRequest {
+  provider?: string
+  model?: string
+  language?: string
+  config_version?: string
+  attempt_id?: string
+  retry?: boolean
+}
+
+export interface SttPrepState {
+  key: [string, string]
+  attempt_id: string
+  phase: 'queued' | 'resolving' | 'downloading' | 'loading' | 'ready' | 'error' | 'uninitialized'
+  downloaded_bytes: number | null
+  total_bytes: number | null
+  progress: number | null
+  started_at: number | null
+  updated_at: number
+  error: string | null
+  roles: string[]
+}
+
+export interface SttPrepSnapshot {
+  runtime_id: string | null
+  revision: number
+  active: SttPrepState | null
+  pending: SttPrepState[]
+  states: SttPrepState[]
+}
+
+export interface SttStatusPayload {
+  loaded: boolean
+  loading: boolean
+  model: string
+  provider: string
+  config_version: string
+  preparation: SttPrepSnapshot
+  detail?: string
+}
+
+export interface SttTestResult {
+  ok: boolean
+  detail?: string
+  text?: string
+  config_version?: string
+  pending?: boolean
+  busy?: boolean
+  stale?: boolean
+  reason?: string
+  attempt_id?: string
+  state?: SttPrepState
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -344,7 +397,7 @@ export const api = {
     request<{ ok: boolean; image: string }>('/api/capture-server-screen', { method: 'POST', body: '{}' }),
   askFromServerScreens: (images: string[]) =>
     request('/api/ask-from-server-screens', { method: 'POST', body: JSON.stringify({ images }) }),
-  getSttStatus: () => request('/api/stt/status'),
+  getSttStatus: () => request<SttStatusPayload>('/api/stt/status'),
   checkModelsHealth: () => request('/api/models/health', { method: 'POST' }),
   /** 当前各模型健康状态（检测中/可用/不可用） */
   getModelsHealth: () => request<{
@@ -370,7 +423,11 @@ export const api = {
       think_detail?: string
       think_disabled_detail?: string
     }>('/api/models/probe/' + index, { method: 'POST' }),
-  sttTest: () => request<{ ok: boolean; detail?: string; text?: string }>('/api/stt/test', { method: 'POST' }),
+  sttTest: (body?: SttTestRequest) =>
+    request<SttTestResult>('/api/stt/test', {
+      method: 'POST',
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
 
   // Knowledge
   knowledgeSummary: () => request('/api/knowledge/summary'),

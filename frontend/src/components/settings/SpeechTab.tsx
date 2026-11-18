@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import {
   Save,
   Mic,
@@ -13,7 +13,11 @@ import {
 } from 'lucide-react'
 import { useInterviewStore } from '@/stores/configStore'
 import type { AppConfig } from '@/stores/slices/types'
-import { api } from '@/lib/api'
+import { api, type SttPrepSnapshot, type SttPrepState, type SttTestRequest, type SttTestResult } from '@/lib/api'
+import {
+  describeSttPreparation,
+  findPreparationState,
+} from './sttPreparationDisplay'
 import { updateConfigAndRefresh } from '@/lib/configSync'
 import {
   Section,
@@ -150,91 +154,579 @@ function speechFormSnapshot(value: SpeechForm): string {
 }
 
 export default function SpeechTab() {
+  type SttLocalPhase = 'saving' | 'posting' | 'waiting' | 'testing' | 'done'
+  type SttLocalOp = {
+    id: number
+    phase: SttLocalPhase
+    key: [string, string]
+    attemptId: string | null
+    configVersion: string
+    savedForm: SpeechForm | null
+    rawState: SttPrepState | null
+    testStarted: boolean
+    /** Attempt + snapshot revision of the last real test, so a stale "ready"
+     * snapshot cannot make the panel re-POST the same test in a tight loop. */
+    testedAttemptId: string | null
+    /** Snapshot revision the last real test ran at (tight-loop guard). */
+    testedAtRevision: number | null
+    /** Attempts this operation already bound to; adoption only moves forward. */
+    attemptHistory: string[]
+    invalidated: boolean
+    toasted: boolean
+    hint: string | null
+  }
+  type SpeechSaveOutcome =
+    | { ok: true; form: SpeechForm; configVersion: string }
+    | { ok: false; error: string }
+
+  const STT_ACTIVE_PREP_PHASES: ReadonlyArray<SttPrepState['phase']> = ['queued', 'resolving', 'downloading', 'loading']
+
+  function speechConfigVersion(value: AppConfig | null | undefined): string {
+    const raw = (value as { stt_config_version?: unknown } | null | undefined)?.stt_config_version
+    return typeof raw === 'string' ? raw : ''
+  }
+
+  function preparationHasActiveWork(prep: SttPrepSnapshot | null | undefined): boolean {
+    if (!prep) return false
+    if (prep.active != null && STT_ACTIVE_PREP_PHASES.includes(prep.active.phase)) return true
+    if (prep.pending.some((entry) => STT_ACTIVE_PREP_PHASES.includes(entry.phase))) return true
+    return prep.states.some((entry) => STT_ACTIVE_PREP_PHASES.includes(entry.phase))
+  }
+
   const config = useInterviewStore((s) => s.config)
   const options = useInterviewStore((s) => s.options)
-  const [form, setForm] = useState<SpeechForm>(() => (config ? speechFormFromConfig(config) : DEFAULT_SPEECH_FORM))
+  const sttPreparation = useInterviewStore((s) => s.sttPreparation)
+  const wsConnected = useInterviewStore((s) => s.wsConnected)
+  const [form, setFormState] = useState<SpeechForm>(() => (config ? speechFormFromConfig(config) : DEFAULT_SPEECH_FORM))
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [sttTesting, setSttTesting] = useState(false)
   const [sttTestResult, setSttTestResult] = useState<{ ok: boolean; detail?: string; text?: string } | null>(null)
+  const [localOpView, setLocalOpView] = useState<SttLocalOp | null>(null)
+  const [stalled, setStalled] = useState(false)
   const savingRef = useRef(false)
   const sttTestingRef = useRef(false)
+  const mountedRef = useRef(true)
+  const opRef = useRef<SttLocalOp | null>(null)
+  const opSeqRef = useRef(0)
+  const formEditSeqRef = useRef(0)
+  const formRef = useRef(form)
+  const dirtyRef = useRef(false)
+  const pollInFlightRef = useRef(false)
+  const workActiveRef = useRef(false)
+  const visiblePrepStateRef = useRef<SttPrepState | null>(null)
+  const lastPrepSignatureRef = useRef('')
+  const lastPrepChangeAtRef = useRef(Date.now())
   const { dirty, markSaved, resetBaseline } = useDirtySnapshot(form)
   useSettingsDirtyRegistration('speech', dirty)
-  const formRef = useRef(form)
-  const dirtyRef = useRef(dirty)
   formRef.current = form
   dirtyRef.current = dirty
 
-  useEffect(() => {
-    if (!config || dirtyRef.current) return
-    const nextForm = speechFormFromConfig(config)
-    if (speechFormSnapshot(formRef.current) === speechFormSnapshot(nextForm)) return
-    setForm(nextForm)
-    resetBaseline(nextForm)
-    setSttTestResult(null)
-  }, [config, dirty, resetBaseline])
+  const updateOp = useCallback((patch: Partial<SttLocalOp>): SttLocalOp | null => {
+    const current = opRef.current
+    if (!current) return null
+    const next = { ...current, ...patch }
+    opRef.current = next
+    if (mountedRef.current) setLocalOpView(next)
+    return next
+  }, [])
 
-  const handleSave = async () => {
-    if (savingRef.current) return false
+  const isLiveOpId = useCallback((id: number): boolean => {
+    const current = opRef.current
+    return current != null && current.id === id && !current.invalidated && mountedRef.current
+  }, [])
+
+  const stopTesting = useCallback(() => {
+    sttTestingRef.current = false
+    if (mountedRef.current) setSttTesting(false)
+  }, [])
+
+  const invalidateLocalOperation = useCallback(() => {
+    const current = opRef.current
+    if (!current || current.invalidated || current.phase === 'done') return
+    const next = { ...current, invalidated: true }
+    opRef.current = next
+    sttTestingRef.current = false
+    if (mountedRef.current) {
+      setSttTesting(false)
+      setLocalOpView(next)
+    }
+  }, [])
+
+  const setForm = useCallback((updater: SpeechForm | ((prev: SpeechForm) => SpeechForm)) => {
+    formEditSeqRef.current += 1
+    invalidateLocalOperation()
+    setFormState(updater)
+  }, [invalidateLocalOperation])
+
+  const normalizeSpeechForm = useCallback((value: SpeechForm): SpeechForm => ({
+    ...value,
+    candidate_remote_stt_enabled: value.candidate_asr_enabled && value.candidate_stt_provider !== 'whisper',
+    candidate_context_wait_ms: clampIntegerInput(value.candidate_context_wait_ms, 0, 2000, 200),
+    candidate_context_max_chars: clampIntegerInput(value.candidate_context_max_chars, 100, 4000, 900),
+    candidate_context_min_chars: clampIntegerInput(value.candidate_context_min_chars, 1, 100, 6),
+    candidate_streaming_asr_interval_ms: clampIntegerInput(value.candidate_streaming_asr_interval_ms, 800, 5000, 1500),
+    silence_threshold: clampNumberInput(value.silence_threshold, 0.001, 0.1, 0.01),
+    silence_duration: clampNumberInput(value.silence_duration, 0.5, 10, 1.2),
+    transcription_min_sig_chars: clampIntegerInput(value.transcription_min_sig_chars, 1, 50, 2),
+    assist_transcription_merge_gap_sec: clampNumberInput(value.assist_transcription_merge_gap_sec, 0, 15, 2.0),
+    assist_transcription_merge_max_sec: clampNumberInput(value.assist_transcription_merge_max_sec, 1, 120, 12.0),
+  }), [])
+
+  const toastOnce = useCallback((opId: number, message: string) => {
+    const current = opRef.current
+    if (!current || current.id !== opId || current.toasted) return
+    updateOp({ toasted: true })
+    useInterviewStore.getState().setToastMessage(message)
+  }, [updateOp])
+
+  const requestPreparationSnapshot = useCallback(async () => {
+    if (pollInFlightRef.current) return
+    pollInFlightRef.current = true
+    try {
+      const status = await api.getSttStatus()
+      if (!mountedRef.current) return
+      if (status?.preparation) {
+        useInterviewStore.getState().applySttPreparation(status.preparation, status.config_version)
+        workActiveRef.current = preparationHasActiveWork(status.preparation) || sttTestingRef.current
+      }
+    } catch {
+      // Nonterminal on purpose: keep the last accepted snapshot and poll again.
+    } finally {
+      pollInFlightRef.current = false
+    }
+  }, [])
+
+  const runActualTest = useCallback(async (opId: number) => {
+    const op = opRef.current
+    if (!op || op.id !== opId || op.invalidated || !mountedRef.current) return
+    if (op.phase !== 'waiting' || op.testStarted || !op.savedForm || !op.attemptId) return
+    const revision = (useInterviewStore.getState().sttPreparation as SttPrepSnapshot).revision
+    if (op.testedAttemptId === op.attemptId && op.testedAtRevision === revision) return
+    updateOp({ testStarted: true, phase: 'testing', testedAttemptId: op.attemptId, testedAtRevision: revision })
+    const savedForm = op.savedForm
+    const payload: SttTestRequest = {
+      provider: savedForm.stt_provider,
+      config_version: op.configVersion,
+      attempt_id: op.attemptId,
+    }
+    if (savedForm.stt_provider === 'whisper') {
+      payload.model = savedForm.whisper_model
+      payload.language = savedForm.whisper_language
+    }
+    let result: SttTestResult
+    try {
+      result = await api.sttTest(payload)
+    } catch (e: any) {
+      if (!isLiveOpId(opId)) return
+      stopTesting()
+      updateOp({ phase: 'done' })
+      setSttTestResult({ ok: false, detail: e?.message ?? 'STT 测试失败' })
+      toastOnce(opId, `STT 测试失败: ${e?.message ?? '未知错误'}`)
+      return
+    }
+    if (!isLiveOpId(opId)) return
+    const resultVersion = result.config_version ?? ''
+    const storedVersion = speechConfigVersion(useInterviewStore.getState().config)
+    if (
+      result.stale
+      || (op.configVersion !== '' && resultVersion !== '' && resultVersion !== op.configVersion)
+      || (op.configVersion !== '' && storedVersion !== '' && storedVersion !== op.configVersion)
+    ) {
+      stopTesting()
+      updateOp({ phase: 'done', invalidated: true, hint: '测试结果已过期，请重新测试' })
+      return
+    }
+    if (result.busy) {
+      stopTesting()
+      updateOp({ phase: 'done', hint: result.reason === 'inference_busy' ? '模型正在处理其他推理任务' : '正在测试其他配置' })
+      return
+    }
+    if (result.pending) {
+      // Still preparing (or the attempt was replaced while this test was in
+      // flight). Release the in-flight flag and follow the attempt the backend
+      // actually owns; otherwise the panel stays on "测试中…" forever.
+      const nextAttemptId = result.attempt_id ?? result.state?.attempt_id ?? op.attemptId
+      const attemptChanged = nextAttemptId !== op.attemptId
+      updateOp({
+        phase: 'waiting',
+        attemptId: nextAttemptId,
+        testStarted: false,
+        // Only a new attempt is worth testing again; the same attempt at the
+        // same snapshot revision must not re-POST if the snapshot still reads
+        // "ready" (that would spin).
+        ...(attemptChanged
+          ? {
+              testedAttemptId: null,
+              testedAtRevision: null,
+              attemptHistory: op.attemptHistory.includes(nextAttemptId)
+                ? op.attemptHistory
+                : [...op.attemptHistory, nextAttemptId],
+            }
+          : {}),
+        rawState: result.state ?? op.rawState,
+        ...(result.state?.key ? { key: result.state.key } : {}),
+      })
+      observeBoundPreparation(opId)
+      return
+    }
+    if (result.ok) {
+      stopTesting()
+      updateOp({ phase: 'done' })
+      setSttTestResult({ ok: true, detail: result.detail, text: result.text })
+      toastOnce(opId, 'STT 连接成功')
+      return
+    }
+    stopTesting()
+    updateOp({ phase: 'done' })
+    setSttTestResult({ ok: false, detail: result.detail ?? result.reason ?? 'STT 测试失败', text: result.text })
+    toastOnce(opId, `STT 测试失败: ${result.detail ?? result.reason ?? '未知错误'}`)
+  }, [isLiveOpId, stopTesting, toastOnce, updateOp])
+
+  const observeBoundPreparation = useCallback((opId: number): boolean => {
+    const op = opRef.current
+    if (!op || op.id !== opId || op.invalidated || !mountedRef.current) return false
+    if (op.phase !== 'waiting' || !op.attemptId || op.testStarted) return false
+    const snapshot = useInterviewStore.getState().sttPreparation as SttPrepSnapshot
+    let state = findPreparationState(snapshot, op.key, op.attemptId)
+    let boundAttemptId = op.attemptId
+    if (!state) {
+      // The attempt can be replaced without this tab ever seeing a pending
+      // response (another tab retried, or the lane promoted a retry). Follow
+      // whatever attempt the lane now owns for this key instead of waiting
+      // forever for one that no longer exists. Only an attempt this operation
+      // has not already bound to is adopted, so a stale snapshot cannot drag
+      // the op backwards onto a superseded attempt.
+      const replaced = findPreparationState(snapshot, op.key)
+      if (replaced?.attempt_id && !op.attemptHistory.includes(replaced.attempt_id)) {
+        state = replaced
+        boundAttemptId = replaced.attempt_id
+        updateOp({
+          attemptId: replaced.attempt_id,
+          attemptHistory: [...op.attemptHistory, replaced.attempt_id],
+          testedAttemptId: null,
+          testedAtRevision: null,
+          rawState: replaced,
+          ...(replaced.key ? { key: replaced.key } : {}),
+        })
+      }
+    }
+    if (!state) return false
+    if (state.phase === 'ready') {
+      updateOp({ rawState: null })
+      void runActualTest(opId)
+      return true
+    }
+    if (state.phase === 'error') {
+      stopTesting()
+      updateOp({
+        phase: 'done',
+        attemptId: state.attempt_id ?? boundAttemptId,
+        rawState: state,
+        ...(state.key ? { key: state.key } : {}),
+      })
+      toastOnce(opId, 'Whisper 模型准备失败，请重试')
+      return true
+    }
+    return false
+  }, [runActualTest, stopTesting, toastOnce, updateOp])
+
+  const applyPreparationOutcome = useCallback((opId: number, result: SttTestResult) => {
+    const op = opRef.current
+    if (!op || op.id !== opId || op.invalidated || !mountedRef.current) return
+    const resultVersion = result.config_version ?? ''
+    const storedVersion = speechConfigVersion(useInterviewStore.getState().config)
+    if (
+      result.stale
+      || (op.configVersion !== '' && resultVersion !== '' && resultVersion !== op.configVersion)
+      || (op.configVersion !== '' && storedVersion !== '' && storedVersion !== op.configVersion)
+    ) {
+      stopTesting()
+      updateOp({ phase: 'done', invalidated: true, hint: '测试结果已过期，请重新测试' })
+      return
+    }
+    if (result.busy) {
+      stopTesting()
+      updateOp({ phase: 'done', hint: result.reason === 'inference_busy' ? '模型正在处理其他推理任务' : '正在测试其他配置' })
+      return
+    }
+    const state = result.state ?? null
+    if (result.pending === true || (state != null && STT_ACTIVE_PREP_PHASES.includes(state.phase))) {
+      const nextAttemptId = result.attempt_id ?? state?.attempt_id ?? null
+      updateOp({
+        phase: 'waiting',
+        attemptId: nextAttemptId,
+        // Record every attempt this operation binds to, so a later stale
+        // snapshot can never drag it back onto one it already left.
+        ...(nextAttemptId && !op.attemptHistory.includes(nextAttemptId)
+          ? { attemptHistory: [...op.attemptHistory, nextAttemptId] }
+          : {}),
+        rawState: state,
+        ...(state?.key ? { key: state.key } : {}),
+        ...(op.configVersion === '' && resultVersion !== '' ? { configVersion: resultVersion } : {}),
+      })
+      observeBoundPreparation(opId)
+      return
+    }
+    if (state != null && state.phase === 'error') {
+      stopTesting()
+      updateOp({
+        phase: 'done',
+        attemptId: state.attempt_id ?? op.attemptId,
+        rawState: state,
+        ...(state.key ? { key: state.key } : {}),
+      })
+      toastOnce(opId, 'Whisper 模型准备失败，请重试')
+      return
+    }
+    if (result.ok) {
+      stopTesting()
+      updateOp({ phase: 'done' })
+      setSttTestResult({ ok: true, detail: result.detail, text: result.text })
+      toastOnce(opId, 'STT 连接成功')
+      return
+    }
+    stopTesting()
+    updateOp({ phase: 'done' })
+    setSttTestResult({ ok: false, detail: result.detail ?? result.reason ?? 'STT 测试失败', text: result.text })
+    toastOnce(opId, `STT 测试失败: ${result.detail ?? result.reason ?? '未知错误'}`)
+  }, [observeBoundPreparation, stopTesting, toastOnce, updateOp])
+
+  const runPreparationPost = useCallback(async (opId: number, wantsRetry: boolean) => {
+    const op = opRef.current
+    if (!op || op.id !== opId || op.invalidated || !mountedRef.current || !op.savedForm) return
+    const payload: SttTestRequest = {
+      provider: op.savedForm.stt_provider,
+      config_version: op.configVersion,
+    }
+    if (op.savedForm.stt_provider === 'whisper') {
+      payload.model = op.savedForm.whisper_model
+      payload.language = op.savedForm.whisper_language
+    }
+    if (wantsRetry) payload.retry = true
+    let result: SttTestResult
+    try {
+      result = await api.sttTest(payload)
+    } catch (e: any) {
+      if (!isLiveOpId(opId)) return
+      stopTesting()
+      updateOp({ phase: 'done' })
+      setSttTestResult({ ok: false, detail: e?.message ?? 'STT 测试失败' })
+      toastOnce(opId, `STT 测试失败: ${e?.message ?? '未知错误'}`)
+      return
+    }
+    if (!isLiveOpId(opId)) return
+    applyPreparationOutcome(opId, result)
+  }, [applyPreparationOutcome, isLiveOpId, stopTesting, toastOnce, updateOp])
+
+  const performSave = useCallback(async (silent: boolean): Promise<SpeechSaveOutcome> => {
+    if (savingRef.current) return { ok: false, error: '正在保存' }
+    const submitted = formRef.current
+    const editSeqAtStart = formEditSeqRef.current
     savingRef.current = true
     setSaving(true)
     setSaveState('saving')
     setSaveError(null)
     try {
-      const savedForm = {
-        ...form,
-        candidate_remote_stt_enabled: form.candidate_asr_enabled && form.candidate_stt_provider !== 'whisper',
-        candidate_context_wait_ms: clampIntegerInput(form.candidate_context_wait_ms, 0, 2000, 200),
-        candidate_context_max_chars: clampIntegerInput(form.candidate_context_max_chars, 100, 4000, 900),
-        candidate_context_min_chars: clampIntegerInput(form.candidate_context_min_chars, 1, 100, 6),
-        candidate_streaming_asr_interval_ms: clampIntegerInput(form.candidate_streaming_asr_interval_ms, 800, 5000, 1500),
-        silence_threshold: clampNumberInput(form.silence_threshold, 0.001, 0.1, 0.01),
-        silence_duration: clampNumberInput(form.silence_duration, 0.5, 10, 1.2),
-        transcription_min_sig_chars: clampIntegerInput(form.transcription_min_sig_chars, 1, 50, 2),
-        assist_transcription_merge_gap_sec: clampNumberInput(form.assist_transcription_merge_gap_sec, 0, 15, 2.0),
-        assist_transcription_merge_max_sec: clampNumberInput(form.assist_transcription_merge_max_sec, 1, 120, 12.0),
+      const normalized = normalizeSpeechForm(submitted)
+      const savedResult: unknown = await updateConfigAndRefresh(normalized)
+      const savedVersion = speechConfigVersion(savedResult as AppConfig | null | undefined)
+        || speechConfigVersion(useInterviewStore.getState().config)
+      if (!mountedRef.current) {
+        return { ok: true, form: normalized, configVersion: savedVersion }
       }
-      await updateConfigAndRefresh(savedForm)
-      setForm(savedForm)
-      markSaved(savedForm)
+      if (formEditSeqRef.current === editSeqAtStart) {
+        setFormState(normalized)
+      }
+      markSaved(normalized)
       setSaveState('saved')
-      useInterviewStore.getState().setToastMessage('语音配置已保存')
-      return true
+      if (!silent) useInterviewStore.getState().setToastMessage('语音配置已保存')
+      return { ok: true, form: normalized, configVersion: savedVersion }
     } catch (e: any) {
       const message = e?.message ?? '保存失败'
-      setSaveError(message)
-      setSaveState('error')
-      useInterviewStore.getState().setToastMessage(message)
-      return false
+      if (mountedRef.current) {
+        setSaveError(message)
+        setSaveState('error')
+      }
+      if (!silent) useInterviewStore.getState().setToastMessage(message)
+      return { ok: false, error: message }
     } finally {
       savingRef.current = false
-      setSaving(false)
+      if (mountedRef.current) setSaving(false)
     }
-  }
+  }, [markSaved, normalizeSpeechForm])
 
-  const handleSttTest = async () => {
+  const handleSave = useCallback(() => performSave(false), [performSave])
+
+  const handleSttTest = useCallback(async (retryRequested?: boolean) => {
     if (sttTestingRef.current || savingRef.current) return
+    const wantsRetry = retryRequested === true
+    const id = opSeqRef.current + 1
+    opSeqRef.current = id
+    const startForm = formRef.current
+    const op: SttLocalOp = {
+      id,
+      phase: 'saving',
+      key: [startForm.whisper_model, startForm.whisper_language],
+      attemptId: null,
+      configVersion: '',
+      savedForm: null,
+      rawState: null,
+      testStarted: false,
+      testedAttemptId: null,
+      testedAtRevision: null,
+      attemptHistory: [],
+      invalidated: false,
+      toasted: false,
+      hint: null,
+    }
+    opRef.current = op
     sttTestingRef.current = true
+    workActiveRef.current = true
     setSttTesting(true)
     setSttTestResult(null)
-    try {
-      const saved = await handleSave()
-      if (!saved) {
-        setSttTestResult({ ok: false, detail: '当前语音配置保存失败，请先修复后再测试。' })
+    setLocalOpView(op)
+    setStalled(false)
+    lastPrepSignatureRef.current = ''
+    lastPrepChangeAtRef.current = Date.now()
+    const editSeqAtStart = formEditSeqRef.current
+
+    const outcome = await performSave(true)
+    const current = opRef.current
+    if (!current || current.id !== id || current.invalidated || !mountedRef.current) return
+    if (!outcome.ok) {
+      stopTesting()
+      updateOp({ phase: 'done' })
+      setSttTestResult({ ok: false, detail: '当前语音配置保存失败，请先修复后再测试。' })
+      return
+    }
+    if (formEditSeqRef.current !== editSeqAtStart) return
+    updateOp({
+      phase: 'posting',
+      savedForm: outcome.form,
+      key: [outcome.form.whisper_model, outcome.form.whisper_language],
+      configVersion: outcome.configVersion,
+    })
+    await runPreparationPost(id, wantsRetry)
+  }, [performSave, runPreparationPost, stopTesting, updateOp])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!config) return
+    const incomingVersion = speechConfigVersion(config)
+    const opVersion = opRef.current?.configVersion ?? ''
+    if (opVersion !== '' && incomingVersion !== '' && incomingVersion !== opVersion) {
+      invalidateLocalOperation()
+    }
+    if (dirtyRef.current) return
+    const nextForm = speechFormFromConfig(config)
+    if (speechFormSnapshot(formRef.current) === speechFormSnapshot(nextForm)) return
+    setFormState(nextForm)
+    resetBaseline(nextForm)
+    setSttTestResult(null)
+  }, [config, dirty, resetBaseline, invalidateLocalOperation])
+
+  useEffect(() => {
+    let ignore = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    function scheduleNext() {
+      if (ignore) return
+      timer = setTimeout(run, workActiveRef.current ? 2000 : 5000)
+    }
+    async function run() {
+      if (ignore) return
+      await requestPreparationSnapshot()
+      if (ignore) return
+      scheduleNext()
+    }
+    void requestPreparationSnapshot().then(() => {
+      if (!ignore) scheduleNext()
+    })
+    return () => {
+      ignore = true
+      if (timer !== null) clearTimeout(timer)
+    }
+  }, [wsConnected, requestPreparationSnapshot])
+
+  useEffect(() => {
+    const op = opRef.current
+    if (!op) return
+    observeBoundPreparation(op.id)
+  }, [sttPreparation, observeBoundPreparation])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const state = visiblePrepStateRef.current
+      if (!state) {
+        lastPrepSignatureRef.current = ''
+        lastPrepChangeAtRef.current = Date.now()
+        setStalled((prev) => (prev ? false : prev))
         return
       }
-      const result = await api.sttTest()
-      setSttTestResult(result)
-      useInterviewStore.getState().setToastMessage(result.ok ? 'STT 连接成功' : `STT 测试失败: ${result.detail}`)
-    } catch (e: any) {
-      setSttTestResult({ ok: false, detail: e.message })
-    } finally {
-      sttTestingRef.current = false
-      setSttTesting(false)
-    }
-  }
+      const signature = [
+        state.attempt_id,
+        state.phase,
+        state.downloaded_bytes,
+        state.total_bytes,
+        state.progress,
+        state.updated_at,
+      ].join('|')
+      if (signature !== lastPrepSignatureRef.current) {
+        lastPrepSignatureRef.current = signature
+        lastPrepChangeAtRef.current = Date.now()
+      }
+      const next = STT_ACTIVE_PREP_PHASES.includes(state.phase)
+        && Date.now() - lastPrepChangeAtRef.current >= 20000
+      setStalled((prev) => (prev === next ? prev : next))
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const hasActiveWork = sttTesting || preparationHasActiveWork(sttPreparation)
+  workActiveRef.current = hasActiveWork
+
+  const savedWhisperKey: [string, string] = [
+    config?.whisper_model ?? DEFAULT_SPEECH_FORM.whisper_model,
+    config?.whisper_language ?? DEFAULT_SPEECH_FORM.whisper_language,
+  ]
+  const activeOp = localOpView && !localOpView.invalidated ? localOpView : null
+  const displayKey: [string, string] = activeOp ? activeOp.key : savedWhisperKey
+  const displayAttemptId = activeOp ? activeOp.attemptId : null
+  const acceptedPrepState = findPreparationState(sttPreparation as SttPrepSnapshot, displayKey, displayAttemptId)
+  const rawOpState = activeOp?.rawState ?? null
+  const fallbackPrepState = rawOpState
+    && rawOpState.key[0] === displayKey[0]
+    && rawOpState.key[1] === displayKey[1]
+    && (displayAttemptId == null || rawOpState.attempt_id === displayAttemptId)
+    ? rawOpState
+    : null
+  const visiblePrepState: SttPrepState | null = acceptedPrepState ?? fallbackPrepState
+  const prepDisplay = describeSttPreparation(visiblePrepState)
+  visiblePrepStateRef.current = visiblePrepState
+  const statusHint = localOpView?.hint ?? null
+  const fallbackStatusLabel = localOpView && !localOpView.invalidated
+    ? localOpView.phase === 'testing'
+      ? '正在测试语音连接…'
+      : localOpView.phase === 'saving' || localOpView.phase === 'posting' || localOpView.phase === 'waiting'
+        ? '正在等待 Whisper 模型准备…'
+        : null
+    : null
+  const prepStatusLabel = statusHint ?? prepDisplay?.label ?? fallbackStatusLabel ?? '暂无模型准备任务'
+  const prepStatusDetail = statusHint ? null : (prepDisplay?.detail ?? null)
+  const showPrepRetry = !statusHint && prepDisplay?.kind === 'error'
+  const showStallHint = stalled && visiblePrepState != null && STT_ACTIVE_PREP_PHASES.includes(visiblePrepState.phase)
+  const stallHintText = visiblePrepState?.phase === 'loading'
+    ? '仍在加载模型，请稍候'
+    : visiblePrepState?.phase === 'queued'
+      ? '正在等待其他模型准备完成'
+      : '下载较慢，请检查网络连接后继续等待'
 
   const providers = options?.stt_providers ?? ['whisper', 'doubao', 'generic']
   const providerSupported = providers.includes(form.stt_provider)
@@ -449,30 +941,56 @@ export default function SpeechTab() {
           </Field>
         )}
 
-        <div className="flex items-center gap-3 pt-1">
-          <button
-            type="button"
-            onClick={handleSttTest}
-            disabled={sttTesting || saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent-blue/15 hover:bg-accent-blue/25 border border-accent-blue/30 text-accent-blue text-xs font-medium transition-colors disabled:opacity-60"
+        <div className='flex flex-col gap-2 pt-1'>
+          <div
+            role='status'
+            aria-label='Whisper 模型准备状态'
+            data-testid='stt-preparation-status'
+            className='flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/50 bg-bg-secondary/30 px-3 py-2'
           >
-            {sttTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-            {sttTesting ? '测试中…' : '保存并测试'}
-          </button>
-          <span className="text-[10px] leading-relaxed text-text-muted">会先保存当前语音配置，再测试主链路 ASR。</span>
-          {sttTestResult && (
-            <div className="flex flex-col gap-1 min-w-0">
-              <StatusBadge
-                status={sttTestResult.ok ? 'ok' : 'error'}
-                label={sttTestResult.ok ? '连接成功' : (sttTestResult.detail?.slice(0, 40) || '连接失败')}
-              />
-              {sttTestResult.ok && (
-                <div className="text-[10px] text-text-muted max-w-[360px] truncate">
-                  返回文本：{sttTestResult.text?.trim() || '空'}
-                </div>
-              )}
-            </div>
-          )}
+            <span className='text-xs font-medium text-text-primary'>{prepStatusLabel}</span>
+            {prepStatusDetail && (
+              <span className='min-w-0 break-all text-[10px] leading-relaxed text-text-muted'>{prepStatusDetail}</span>
+            )}
+            {showStallHint && (
+              <span className='text-[10px] leading-relaxed text-amber-500'>{stallHintText}</span>
+            )}
+            {showPrepRetry && (
+              <button
+                type='button'
+                onClick={() => { void handleSttTest(true) }}
+                disabled={sttTesting || saving}
+                className='ml-auto flex items-center gap-1.5 rounded-lg border border-accent-blue/30 bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue transition-colors hover:bg-accent-blue/25 disabled:opacity-60'
+              >
+                重试准备并测试
+              </button>
+            )}
+          </div>
+          <div className='flex items-center gap-3'>
+            <button
+              type='button'
+              onClick={() => { void handleSttTest(false) }}
+              disabled={sttTesting || saving}
+              className='flex items-center gap-1.5 rounded-lg border border-accent-blue/30 bg-accent-blue/15 px-4 py-2 text-xs font-medium text-accent-blue transition-colors hover:bg-accent-blue/25 disabled:opacity-60'
+            >
+              {sttTesting ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Zap className='w-3.5 h-3.5' />}
+              {sttTesting ? '测试中…' : '保存并测试'}
+            </button>
+            <span className='text-[10px] leading-relaxed text-text-muted'>会先保存当前语音配置，再测试主链路 ASR。</span>
+            {sttTestResult && (
+              <div className='flex min-w-0 flex-col gap-1'>
+                <StatusBadge
+                  status={sttTestResult.ok ? 'ok' : 'error'}
+                  label={sttTestResult.ok ? '连接成功' : (sttTestResult.detail?.slice(0, 40) || '连接失败')}
+                />
+                {sttTestResult.ok && (
+                  <div className='max-w-[360px] truncate text-[10px] text-text-muted'>
+                    返回文本：{sttTestResult.text?.trim() || '空'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </GradientCard>
 
