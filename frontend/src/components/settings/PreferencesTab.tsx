@@ -506,6 +506,20 @@ export default function PreferencesTab() {
               /
               <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.overlayNextQuestion?.key ?? 'CommandOrControl+Down')}</kbd>
               回看上一题/下一题, 不影响当前生成。
+              <br />
+              悬浮窗打开时,
+              <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.overlayScrollPrevAnswer?.key ?? 'CommandOrControl+Shift+Up')}</kbd>
+              /
+              <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.overlayScrollNextAnswer?.key ?? 'CommandOrControl+Shift+Down')}</kbd>
+              滚动答案,
+              <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.overlayScrollPrevQuestion?.key ?? 'CommandOrControl+Shift+Left')}</kbd>
+              /
+              <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.overlayScrollNextQuestion?.key ?? 'CommandOrControl+Shift+Right')}</kbd>
+              滚动题目（仅专注面板）。
+              <br />
+              按
+              <kbd className="px-1 py-0.5 bg-bg-hover rounded text-[9px]">{getShortcutDisplay(shortcuts.toggleOverlayPassthrough?.key ?? 'CommandOrControl+1')}</kbd>
+              切换鼠标穿透,点击落到下层窗口; 再按一次、托盘菜单取消勾选或显示主窗口即可恢复交互。
             </p>
           </>
         )}
