@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('overlay-question-command', wrapped);
     return () => ipcRenderer.removeListener('overlay-question-command', wrapped);
   },
+  onOverlayScrollCommand: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on('overlay-scroll-command', wrapped);
+    return () => ipcRenderer.removeListener('overlay-scroll-command', wrapped);
+  },
   onDesktopToast: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on('desktop-toast', wrapped);

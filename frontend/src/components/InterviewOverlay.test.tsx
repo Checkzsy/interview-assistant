@@ -1062,4 +1062,158 @@ describe('InterviewOverlay', () => {
     })
     expect(await screen.findByText((text, element) => element?.tagName.toLowerCase() === 'kbd' && /6$/.test(text))).toBeInTheDocument()
   })
+
+  it('scrolls the answer viewport from overlay scroll commands in every visible mode', () => {
+    let scrollListener:
+      | ((payload: { target: 'answer' | 'question'; direction: 'up' | 'down' }) => void)
+      | null = null
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      onOverlayScrollCommand: (listener: typeof scrollListener) => {
+        scrollListener = listener
+        return vi.fn()
+      },
+    }
+
+    for (const [mode, selector] of [
+      ['glass', '.ov-answer'],
+      ['prompt', '.ov-answer'],
+      ['focus', '.ov-focus-content'],
+    ] as const) {
+      useUiPrefsStore.setState({
+        interviewOverlayMode: mode,
+        interviewOverlayShowBg: mode !== 'prompt',
+      })
+      localStorage.setItem('ia_overlay_mode', mode)
+      localStorage.setItem('ia_overlay_show_bg', mode === 'prompt' ? '0' : '1')
+      const { unmount } = render(<InterviewOverlay />)
+      const scroller = document.querySelector(selector) as HTMLDivElement
+      Object.defineProperty(scroller, 'scrollHeight', { value: 1000, configurable: true })
+      Object.defineProperty(scroller, 'clientHeight', { value: 120, configurable: true })
+      scroller.scrollTop = 0
+
+      act(() => scrollListener?.({ target: 'answer', direction: 'down' }))
+      expect(scroller.scrollTop).toBe(40)
+      act(() => scrollListener?.({ target: 'answer', direction: 'down' }))
+      expect(scroller.scrollTop).toBe(80)
+      act(() => scrollListener?.({ target: 'answer', direction: 'up' }))
+      expect(scroller.scrollTop).toBe(40)
+      act(() => {
+        for (let i = 0; i < 30; i += 1) scrollListener?.({ target: 'answer', direction: 'down' })
+      })
+      expect(scroller.scrollTop).toBe(880)
+      unmount()
+    }
+  })
+
+  it('uses a viewport-proportional scroll step when the panel is taller than the 40px floor', () => {
+    let scrollListener:
+      | ((payload: { target: 'answer' | 'question'; direction: 'up' | 'down' }) => void)
+      | null = null
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      onOverlayScrollCommand: (listener: typeof scrollListener) => {
+        scrollListener = listener
+        return vi.fn()
+      },
+    }
+    useUiPrefsStore.setState({ interviewOverlayMode: 'glass', interviewOverlayShowBg: true })
+    localStorage.setItem('ia_overlay_mode', 'glass')
+    localStorage.setItem('ia_overlay_show_bg', '1')
+    const { unmount } = render(<InterviewOverlay />)
+    const scroller = document.querySelector('.ov-answer') as HTMLDivElement
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true })
+    scroller.scrollTop = 0
+
+    act(() => scrollListener?.({ target: 'answer', direction: 'down' }))
+    expect(scroller.scrollTop).toBe(100)
+    unmount()
+  })
+
+  it('scrolls the wrapped focus question only while focus mode is active', () => {
+    let scrollListener:
+      | ((payload: { target: 'answer' | 'question'; direction: 'up' | 'down' }) => void)
+      | null = null
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      onOverlayScrollCommand: (listener: typeof scrollListener) => {
+        scrollListener = listener
+        return vi.fn()
+      },
+    }
+    useUiPrefsStore.setState({ interviewOverlayMode: 'glass', interviewOverlayShowBg: true })
+    localStorage.setItem('ia_overlay_mode', 'glass')
+    localStorage.setItem('ia_overlay_show_bg', '1')
+    const glass = render(<InterviewOverlay />)
+    expect(document.querySelector('.ov-focus-question-text')).toBeNull()
+    act(() => scrollListener?.({ target: 'question', direction: 'down' }))
+    expect(document.querySelector('.ov-focus-question-text')).toBeNull()
+    glass.unmount()
+
+    useUiPrefsStore.setState({ interviewOverlayMode: 'focus', interviewOverlayShowBg: true })
+    localStorage.setItem('ia_overlay_mode', 'focus')
+    render(<InterviewOverlay />)
+    const question = document.querySelector('.ov-focus-question-text') as HTMLDivElement
+    Object.defineProperty(question, 'scrollHeight', { value: 300, configurable: true })
+    Object.defineProperty(question, 'clientHeight', { value: 90, configurable: true })
+
+    act(() => scrollListener?.({ target: 'question', direction: 'down' }))
+    expect(question.scrollTop).toBe(40)
+    act(() => {
+      for (let i = 0; i < 10; i += 1) scrollListener?.({ target: 'question', direction: 'down' })
+    })
+    expect(question.scrollTop).toBe(210)
+    act(() => scrollListener?.({ target: 'question', direction: 'up' }))
+    expect(question.scrollTop).toBe(170)
+  })
+
+  it('stops auto-follow when a scroll command leaves the bottom and resumes at the threshold', () => {
+    useUiPrefsStore.setState({
+      interviewOverlayMode: 'prompt',
+      interviewOverlayShowBg: false,
+      interviewOverlayPromptAutoFollow: true,
+    })
+    localStorage.setItem('ia_overlay_mode', 'prompt')
+    localStorage.setItem('ia_overlay_show_bg', '0')
+    localStorage.setItem('ia_overlay_prompt_auto_follow', '1')
+    useInterviewStore.setState({
+      qaPairs: [{ ...qa, answer: '正在生成第一段。', status: 'streaming' }],
+      streamingIds: ['qa-1'],
+    })
+    let scrollListener:
+      | ((payload: { target: 'answer' | 'question'; direction: 'up' | 'down' }) => void)
+      | null = null
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      onOverlayScrollCommand: (listener: typeof scrollListener) => {
+        scrollListener = listener
+        return vi.fn()
+      },
+    }
+    const { rerender } = render(<InterviewOverlay />)
+    const scroller = document.querySelector('.ov-answer') as HTMLDivElement
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scroller, 'clientHeight', { value: 120, configurable: true })
+
+    act(() => scrollListener?.({ target: 'answer', direction: 'down' }))
+    expect(scroller.scrollTop).toBe(40)
+    act(() => {
+      useInterviewStore.setState({
+        qaPairs: [{ ...qa, answer: '正在生成第一段。\n继续生成第二段。', status: 'streaming' }],
+        streamingIds: ['qa-1'],
+      })
+    })
+    rerender(<InterviewOverlay />)
+    expect(scroller.scrollTop).toBe(40)
+
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1200, configurable: true })
+    scroller.scrollTop = 1040
+    act(() => scrollListener?.({ target: 'answer', direction: 'down' }))
+    expect(scroller.scrollTop).toBe(1080)
+    act(() => {
+      useInterviewStore.setState({
+        qaPairs: [{ ...qa, answer: '正在生成第一段。\n继续生成第二段。\n然后再生成一段。', status: 'streaming' }],
+        streamingIds: ['qa-1'],
+      })
+    })
+    rerender(<InterviewOverlay />)
+    expect(scroller.scrollTop).toBe(1200)
+  })
 })

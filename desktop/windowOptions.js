@@ -1,3 +1,6 @@
+const { StringDecoder } = require('node:string_decoder');
+const { redactText } = require('./log-redact');
+
 function createOverlayChromeOptions(platform, preferredResizable) {
   const isWindows = platform === 'win32';
 
@@ -41,11 +44,59 @@ function writeToStreamSafely(stream, chunk) {
   }
 }
 
-function relayChildOutput(childStream, targetStream, prefix = '') {
+const RELAY_MAX_LINE_BYTES = 8 * 1024;
+const RELAY_DROPPED_TEXT = '[oversized output line dropped]\n';
+
+function relayChildOutput(childStream, targetStream, prefix = '', { onLine } = {}) {
   if (!childStream || typeof childStream.on !== 'function') return () => {};
+
+  // 每流独立：StringDecoder 处理跨 chunk 的 UTF-8，完整行缓冲保证凭据不会被 chunk 切断。
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let dropping = false;
+
+  const emitLine = (line) => {
+    writeToStreamSafely(targetStream, `${prefix}${redactText(line)}\n`);
+    if (typeof onLine === 'function') {
+      try {
+        onLine(line);
+      } catch {
+        /* 行解析失败不能影响日志转发 */
+      }
+    }
+  };
+
+  const feed = (text) => {
+    if (!text) return;
+    if (dropping) {
+      const newline = text.indexOf('\n');
+      if (newline === -1) return;
+      dropping = false;
+      feed(text.slice(newline + 1));
+      return;
+    }
+
+    pending += text;
+    let newline = pending.indexOf('\n');
+    while (newline !== -1) {
+      const line = pending.slice(0, newline).replace(/\r$/, '');
+      pending = pending.slice(newline + 1);
+      if (Buffer.byteLength(line, 'utf8') > RELAY_MAX_LINE_BYTES) {
+        writeToStreamSafely(targetStream, `${prefix}${RELAY_DROPPED_TEXT}`);
+      } else {
+        emitLine(line);
+      }
+      newline = pending.indexOf('\n');
+    }
+    if (Buffer.byteLength(pending, 'utf8') > RELAY_MAX_LINE_BYTES) {
+      pending = '';
+      dropping = true;
+      writeToStreamSafely(targetStream, `${prefix}${RELAY_DROPPED_TEXT}`);
+    }
+  };
+
   const onData = (chunk) => {
-    const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-    writeToStreamSafely(targetStream, `${prefix}${text}`);
+    feed(typeof chunk === 'string' ? decoder.write(Buffer.from(chunk, 'utf8')) : decoder.write(chunk));
   };
   childStream.on('data', onData);
   return () => {

@@ -10,6 +10,8 @@
 - [ ] `build.productName` 保持 `Interview Assistant`。
 - [ ] `build.nsis.oneClick` 保持 `false`，`build.nsis.perMachine` 保持 `false`。
 - [ ] Windows Release workflow 成功完成，GitHub Release 中存在且只有一个本次构建的 `.exe`。
+- [ ] Release workflow 的“Validate published update metadata against the installer”步骤通过；该步骤会用 EXE 实际字节重算 `latest.yml` 的 sha512 和 blockmap 每块校验。失败即不得发布。
+- [ ] Release 同时包含同名 `.exe.blockmap` 与 `latest.yml`；缺任一文件时客户端只能全量下载，甚至看不到更新。
 - [ ] workflow 日志中“Stage the bundled whisper-base model”“Smoke-test the bundled model offline”“Verify the installer contains the whisper model”三步均为成功；任一步失败都不应发布。
 - [ ] 安装包体积符合预期（内置 base 模型后约 360MB）。
 - [ ] 安装包未签名的 SmartScreen 提示已记录并可接受。
@@ -48,6 +50,22 @@
 5. [ ] 静默安装开启时，点击安装按钮后确认旧应用优雅退出、NSIS 静默安装到原位置并自动重启。
 6. [ ] 静默安装关闭时，确认打开安装向导，走完“换安装位置验证”流程。
 7. [ ] 发布更高的新版本后，确认只对新的 release tag 再次提示。
+
+## 差分升级验证（真实隔离 Windows 环境）
+
+> 只用测试机/隔离 profile，不覆盖用户正在使用的安装。客户端侧无法从 UI 证明“少下载了多少”，以安装器缓存目录与服务端访问日志为准。
+
+1. [ ] **R0 → R1（首个带 SDK 的版本）**：安装 R0，记录安装目录与 `%APPDATA%\interview-assistant-desktop` 下五库、`config.json`、`shortcuts.json`；升级到 R1 时按全量下载（R0 没有 latest.yml/blockmap，属预期）。
+2. [ ] 确认缓存目录布局（`baseCachePath` = `%LOCALAPPDATA%`，子目录名 = `updaterCacheDirName`，本应用为 `interview-assistant-desktop-updater`）：
+   - 根目录 `%LOCALAPPDATA%\interview-assistant-desktop-updater\installer.exe`：由 NSIS 安装成功时复制（缓存根，不是 `pending`）；
+   - 根目录 `current.blockmap`：只有在客户端用 SDK 完成过一次下载后才会出现（完成后由 `pending` 复制上来），从旧版客户端升级到 R1 时可能不存在；
+   - `pending\Interview.Assistant.Setup.X.Y.Z.exe`、`pending\update-info.json`、`pending\current.blockmap`：SDK 下载暂存区。
+3. [ ] **R1 → R2**：记录下载进度总量。差分只会复用根目录 `installer.exe` 作为旧基线；旧 blockmap 优先读根目录 `current.blockmap`，缺失时改从发布端下载 `R1.exe.blockmap`。服务端支持 Range 且基线匹配时应走差分（进度总量明显小于 R2 安装包体积）；只记录实测值，不预设节省比例。
+4. [ ] 确认基线复用：下载完成后不要立刻清理根目录 `installer.exe`；若基线被删、`current.blockmap` 损坏或旧 blockmap 404，升级应自动退回可信全量下载并成功。
+5. [ ] 故意把 `current.blockmap` 改坏后再次升级：应退回全量下载，最终 EXE 的 sha512 与 `latest.yml` 一致，安装仍成功。
+6. [ ] 下载完成后、点安装前，用编辑器破坏 SDK 暂存区里的安装包（`pending\Interview.Assistant.Setup.X.Y.Z.exe`）一个字节：点击安装应被拒绝并要求重新下载，安装器绝不能被启动。
+7. [ ] 发布一个更高的新版本后，在下载中途点击“检查更新”：该请求会等当前下载结束后才执行（下载期间不并发检查）。等本次下载完成、排队检查返回后，旧包不得再显示为可安装，按钮应回到“点击下载更新”，安装按钮文案为“安装已下载的 vX”且 X 与当前显示的新版本一致。
+8. [ ] 每次升级后确认五个 SQLite 库、`config.json`、`shortcuts.json`、内置 Whisper 模型均保留；未启用任何自动安装（关闭应用不应触发安装）。
 
 ## 结果记录
 

@@ -8,20 +8,28 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-def test_packaged_backend_entrypoint_starts_local_uvicorn(monkeypatch):
+def test_packaged_backend_entrypoint_uses_managed_runner(monkeypatch):
     import entrypoint
+    from core import server_runner
 
     captured = {}
     monkeypatch.setenv("PORT", "12345")
-    monkeypatch.setattr(
-        entrypoint.uvicorn,
-        "run",
-        lambda app, **kwargs: captured.update({"app": app, **kwargs}),
-    )
+    monkeypatch.setenv("IA_ACCESS_LOG", "1")
+    monkeypatch.setattr(server_runner, "run_managed", lambda **kwargs: captured.update(kwargs))
 
     entrypoint.main()
 
-    assert captured["app"] is entrypoint.app
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 12345
-    assert captured["reload"] is False
+    assert captured == {"host": "127.0.0.1", "port": 12345, "access_log": True}
+
+
+def test_entrypoint_honours_access_log_switch(monkeypatch):
+    import entrypoint
+    from core import server_runner
+
+    captured = {}
+    monkeypatch.setenv("IA_ACCESS_LOG", "0")
+    monkeypatch.setattr(server_runner, "run_managed", lambda **kwargs: captured.update(kwargs))
+
+    entrypoint.main()
+
+    assert captured["access_log"] is False

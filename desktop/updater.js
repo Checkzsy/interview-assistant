@@ -50,6 +50,7 @@ function pickAsset(assets, kind = 'exe') {
     size: Number(item.size) || null,
     url: item.browser_download_url || item.url || null,
     updatedAt: item.updated_at || null,
+    digest: item.digest || null,
   };
 }
 

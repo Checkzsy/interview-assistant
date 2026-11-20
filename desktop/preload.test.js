@@ -59,6 +59,32 @@ test('preload exposes desktop toast and config update listeners', () => {
   assert.equal(typeof api.onConfigUpdated, 'function');
 });
 
+test('preload forwards overlay scroll commands and removes the listener on cleanup', () => {
+  const events = [];
+  const originalOn = fakeIpcRenderer.on;
+  const originalRemoveListener = fakeIpcRenderer.removeListener;
+  fakeIpcRenderer.on = (channel, handler) => events.push({ type: 'on', channel, handler });
+  fakeIpcRenderer.removeListener = (channel, handler) => events.push({ type: 'remove', channel, handler });
+  try {
+    assert.equal(typeof api.onOverlayScrollCommand, 'function');
+    const received = [];
+    const unsubscribe = api.onOverlayScrollCommand((payload) => received.push(payload));
+
+    assert.equal(events[0].type, 'on');
+    assert.equal(events[0].channel, 'overlay-scroll-command');
+    events[0].handler({}, { target: 'answer', direction: 'down' });
+    assert.deepEqual(received, [{ target: 'answer', direction: 'down' }]);
+
+    unsubscribe();
+    assert.equal(events[1].type, 'remove');
+    assert.equal(events[1].channel, 'overlay-scroll-command');
+    assert.equal(events[1].handler, events[0].handler);
+  } finally {
+    fakeIpcRenderer.on = originalOn;
+    fakeIpcRenderer.removeListener = originalRemoveListener;
+  }
+});
+
 test('preload exposes explicit content protection setter and capture capability probe', async () => {
   assert.equal(typeof api.setContentProtection, 'function');
   assert.equal(typeof api.getCaptureCapability, 'function');

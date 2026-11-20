@@ -76,8 +76,8 @@ function parseExplicitPort(explicit) {
   return Number.isInteger(value) && value > 0 && value <= 65535 ? value : null
 }
 
-// 异步挑选可用端口：显式 PORT > 默认端口 > 回退候选。全部不可用时返回首选端口，
-// 交由启动路径负责报告错误。
+// 异步挑选可用端口：显式 PORT > 默认端口 > 回退候选。全部不可用时返回 null，
+// 由启动路径报告「端口被占用」并安全退出 —— 绝不返回假空闲端口。
 async function resolveServerPort(preferred = DEFAULT_SERVER_PORT, opts = {}) {
   const probe = opts.probe || probePort
   const explicit = parseExplicitPort(opts.envPort)
@@ -94,7 +94,7 @@ async function resolveServerPort(preferred = DEFAULT_SERVER_PORT, opts = {}) {
     const usable = await probe(port)
     if (usable) return port
   }
-  return initial
+  return null
 }
 
 module.exports = { resolveRuntimePaths, buildBackendEnvironment, resolveServerPort, probePort }

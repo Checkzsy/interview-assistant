@@ -85,6 +85,41 @@ const DEFAULT_SHORTCUTS = {
     label: '悬浮窗下一题',
     category: '悬浮窗',
   },
+  overlayScrollPrevAnswer: {
+    action: 'overlayScrollPrevAnswer',
+    key: 'CommandOrControl+Shift+Up',
+    defaultKey: 'CommandOrControl+Shift+Up',
+    label: '悬浮窗答案向上滚动',
+    category: '悬浮窗',
+  },
+  overlayScrollNextAnswer: {
+    action: 'overlayScrollNextAnswer',
+    key: 'CommandOrControl+Shift+Down',
+    defaultKey: 'CommandOrControl+Shift+Down',
+    label: '悬浮窗答案向下滚动',
+    category: '悬浮窗',
+  },
+  overlayScrollPrevQuestion: {
+    action: 'overlayScrollPrevQuestion',
+    key: 'CommandOrControl+Shift+Left',
+    defaultKey: 'CommandOrControl+Shift+Left',
+    label: '悬浮窗题目向上滚动',
+    category: '专注面板',
+  },
+  overlayScrollNextQuestion: {
+    action: 'overlayScrollNextQuestion',
+    key: 'CommandOrControl+Shift+Right',
+    defaultKey: 'CommandOrControl+Shift+Right',
+    label: '悬浮窗题目向下滚动',
+    category: '专注面板',
+  },
+  toggleOverlayPassthrough: {
+    action: 'toggleOverlayPassthrough',
+    key: 'CommandOrControl+1',
+    defaultKey: 'CommandOrControl+1',
+    label: '悬浮窗鼠标穿透',
+    category: '悬浮窗',
+  },
   askScreenForceThink: {
     action: 'askScreenForceThink',
     key: 'CommandOrControl+Alt+/',
@@ -117,6 +152,24 @@ const SUPPORTED_KEYS = new Set([
   'Up', 'Down', 'Left', 'Right',
 ]);
 
+// 早期版本的 14 个动作。迁移时它们的用户键一律优先保留，即使其作用域当前未激活。
+const LEGACY_SHORTCUT_ACTIONS = new Set([
+  'hideOrShowWindow',
+  'hardClearSession',
+  'askFromServerScreen',
+  'cancelAnswer',
+  'addMultiServerScreenShot',
+  'toggleInterviewOverlay',
+  'moveOverlayToMouse',
+  'focusPrevTab',
+  'focusNextTab',
+  'overlayPrevQuestion',
+  'overlayNextQuestion',
+  'askScreenForceThink',
+  'askScreenForceNoThink',
+  'toggleThinkMode',
+]);
+
 function createShortcutState(overrides = {}) {
   return Object.fromEntries(
     Object.entries(DEFAULT_SHORTCUTS).map(([action, shortcut]) => [
@@ -147,16 +200,23 @@ function isValidShortcutKey(key) {
   return modifierKey === '' || modifierKey === 'Shift' || modifierKey === 'Alt' || modifierKey === 'Shift+Alt';
 }
 
-function validateShortcutMap(shortcuts) {
+function validateShortcutMap(shortcuts, previousShortcuts = null) {
   const seen = new Set();
   for (const shortcut of Object.values(shortcuts)) {
     if (!isValidShortcutKey(shortcut.key)) {
       return { ok: false, error: `非法快捷键：${shortcut.key}` };
     }
-    if (seen.has(shortcut.key)) {
+    if (!previousShortcuts && seen.has(shortcut.key)) {
       return { ok: false, error: `快捷键重复：${shortcut.key}` };
     }
     seen.add(shortcut.key);
+  }
+  if (previousShortcuts) {
+    const { hasNewShortcutConflicts } = require('./shortcutRegistry');
+    const keys = (state) => Object.fromEntries(Object.entries(state).map(([action, shortcut]) => [action, shortcut.key]));
+    if (hasNewShortcutConflicts(keys(previousShortcuts), keys(shortcuts))) {
+      return { ok: false, error: '快捷键重复：不得新增冲突，请先化解已有冲突' };
+    }
   }
   return { ok: true };
 }
@@ -194,6 +254,7 @@ function saveShortcutConfig(app, shortcuts) {
 
 module.exports = {
   DEFAULT_SHORTCUTS,
+  LEGACY_SHORTCUT_ACTIONS,
   ShortcutStatus,
   createShortcutState,
   getShortcutsFilePath,

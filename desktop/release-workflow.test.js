@@ -61,3 +61,22 @@ test('Windows release workflow caches and verifies the bundled whisper model', (
   const verifyIndex = source.lastIndexOf('whisper-base');
   assert.ok(distIndex >= 0 && verifyIndex > distIndex, 'packaged model must be verified after the installer build');
 });
+
+test('Windows release workflow gates publishing on the artifact validator', () => {
+  const source = fs.readFileSync(workflowPath, 'utf8');
+
+  // The validator CLI must run against the freshly built dist before upload.
+  const distIndex = source.indexOf('npm run dist');
+  const validatorIndex = source.indexOf('node release-artifacts.js');
+  const publishIndex = source.indexOf('softprops/action-gh-release');
+  assert.ok(distIndex >= 0, 'installer build must run');
+  assert.ok(validatorIndex > distIndex, 'validator must run after the build');
+  assert.ok(publishIndex > validatorIndex, 'publish must happen only after validation');
+  assert.match(source, /release-artifacts\.js\s+--version/);
+
+  // Differential updates need the blockmap and metadata next to the EXE, or the
+  // SDK silently falls back to full downloads (or fails to see any release).
+  for (const required of ['desktop/dist/\\*\\.exe\\.blockmap', 'desktop/dist/latest\\.yml']) {
+    assert.match(source, new RegExp(required), `release must upload ${required}`);
+  }
+});
