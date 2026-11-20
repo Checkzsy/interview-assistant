@@ -11,6 +11,7 @@
 - [ ] `build.nsis.oneClick` 保持 `false`，`build.nsis.perMachine` 保持 `false`。
 - [ ] Windows Release workflow 成功完成，GitHub Release 中存在且只有一个本次构建的 `.exe`。
 - [ ] Release workflow 的“Validate published update metadata against the installer”步骤通过；该步骤会用 EXE 实际字节重算 `latest.yml` 的 sha512 和 blockmap 每块校验。失败即不得发布。
+- [ ] Release workflow 的“Smoke-test packaged backend managed startup”步骤通过；该步骤在父进程持续持有 stdin 的前提下启动打包后的 `backend.exe`，要求它在 stdout 上于 35 秒内输出本次启动的就绪标记（比桌面端 40 秒就绪超时更严格）、就绪后仍持续运行，并在 stdin 关闭后以 0 退出。该门禁覆盖「就绪超时」这类会让用户看到「应用无法启动」的故障；它不验证 lifespan 优雅收尾，也不替代真实安装升级验收。失败即不得发布。
 - [ ] Release 同时包含同名 `.exe.blockmap` 与 `latest.yml`；缺任一文件时客户端只能全量下载，甚至看不到更新。
 - [ ] workflow 日志中“Stage the bundled whisper-base model”“Smoke-test the bundled model offline”“Verify the installer contains the whisper model”三步均为成功；任一步失败都不应发布。
 - [ ] 安装包体积符合预期（内置 base 模型后约 360MB）。

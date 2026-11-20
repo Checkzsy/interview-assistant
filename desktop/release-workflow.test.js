@@ -80,6 +80,23 @@ test('desktop CI runs the packaged app gate tests explicitly', () => {
   assert.match(source, /node --test[^\n]*\bverify-packaged-app\.test\.js\b/);
 });
 
+test('Windows release workflow smoke-tests the packaged backend startup before publishing', () => {
+  const source = fs.readFileSync(workflowPath, 'utf8');
+  const distIndex = source.indexOf('npm run dist');
+  const startupIndex = source.indexOf('node verify-backend-startup.js');
+  const uploadIndex = source.indexOf('uses: actions/upload-artifact@v4');
+  const publishIndex = source.indexOf('softprops/action-gh-release');
+  assert.ok(startupIndex > distIndex, 'startup smoke must run after the frozen backend is built');
+  assert.ok(uploadIndex > startupIndex, 'startup smoke must precede artifact upload');
+  assert.ok(publishIndex > startupIndex, 'startup smoke must precede publishing');
+  assert.match(source, /verify-backend-startup\.js --backend build\/backend/);
+});
+
+test('desktop CI runs the packaged backend startup gate tests explicitly', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.match(source, /node --test[^\n]*\bverify-backend-startup\.test\.js\b/);
+});
+
 test('Windows release workflow gates publishing on the artifact validator', () => {
   const source = fs.readFileSync(workflowPath, 'utf8');
 

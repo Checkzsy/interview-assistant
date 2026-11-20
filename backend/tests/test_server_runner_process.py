@@ -139,3 +139,55 @@ def test_app_load_failure_exits_cleanly_while_managed_stdin_stays_open(tmp_path)
         assert 'fixture app load failed' in ''.join(lines)
     finally:
         cleanup_owned(proc, reader)
+
+
+def spawn_watch_import(tmp_path):
+    env = {
+        **os.environ,
+        'PYTHONPATH': str(BACKEND_DIR),
+        'PYTHONUNBUFFERED': '1',
+        'IA_MANAGED_BACKEND': '1',
+        'IA_BACKEND_LAUNCH_ID': 'fixture-owned-launch',
+        'IA_AUTH_DISABLE': '1',
+        'IA_FIXTURE_SHUTDOWN': str(tmp_path / 'shutdown.txt'),
+        'PORT': str(free_port()),
+    }
+    proc = subprocess.Popen(
+        [sys.executable, str(BACKEND_DIR / 'tests' / 'fixtures' / 'managed_watch_import.py')],
+        cwd=BACKEND_DIR.parent, env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding='utf-8', errors='replace',
+    )
+    lines = []
+    events = queue.Queue()
+
+    def collect():
+        for line in proc.stdout:
+            lines.append(line)
+            events.put(line.rstrip())
+
+    reader = threading.Thread(target=collect, daemon=True)
+    reader.start()
+    return proc, lines, events, reader
+
+
+def test_c_extension_import_completes_while_parent_keeps_stdin_open(tmp_path):
+    """A parked stdin read must not stall the DLL loader (v1.4.0 startup hang).
+
+    Electron holds the child's stdin pipe open for the whole session, so the
+    watcher can never return from a blocking read there. When that outstanding
+    read stalled numpy's extension import, ``from main import app`` never
+    finished and every packaged launch hit the readiness timeout.
+    """
+    proc, lines, events, reader = spawn_watch_import(tmp_path)
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                if events.get(timeout=max(0.01, deadline - time.monotonic())).startswith('WATCH_IMPORT'):
+                    return
+            except queue.Empty:
+                break
+        raise AssertionError('C-extension import stalled behind the stdin watch: ' + ''.join(lines))
+    finally:
+        cleanup_owned(proc, reader)

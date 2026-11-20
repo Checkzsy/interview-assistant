@@ -91,6 +91,16 @@ jobs:
         run: |
           node verify-packaged-app.js --version ($env:GITHUB_REF_NAME.Substring(1))
 
+      - name: Smoke-test packaged backend managed startup
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          # Launches the frozen backend with stdin held open, exactly like the
+          # desktop shell, and requires a readiness marker plus a clean exit on EOF.
+          # 35s is deliberately stricter than the shell's own 40s ready timeout, so
+          # a build that would surface 「应用无法启动」 fails here instead.
+          node verify-backend-startup.js --backend build/backend --timeout 35000
+
       - name: Validate published update metadata against the installer
         working-directory: desktop
         shell: pwsh

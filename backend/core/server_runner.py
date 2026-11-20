@@ -15,11 +15,13 @@ import os
 import stat
 import sys
 import threading
+import time
 from typing import Callable, Optional
 
 MANAGED_ENV = "IA_MANAGED_BACKEND"
 READY_PREFIX = "IA_BACKEND_READY "
 EXIT_GRACE_SECONDS = 20.0
+STDIN_POLL_SECONDS = 0.05
 
 
 def should_watch_stdin(environ: Optional[dict] = None) -> bool:
@@ -31,6 +33,44 @@ def should_watch_stdin(environ: Optional[dict] = None) -> bool:
 def launch_id_from_env(environ: Optional[dict] = None) -> str:
     env = os.environ if environ is None else environ
     return env.get("IA_BACKEND_LAUNCH_ID", "").strip()
+
+
+def _windows_pipe_poll(fd: int):
+    """Return a non-blocking ``(bytes_available, eof)`` probe, or None if unsupported.
+
+    ``PeekNamedPipe`` reports how much data is queued without consuming it, and
+    reports ``ERROR_BROKEN_PIPE`` once the parent closed its write end. Keeping
+    the watcher off blocking reads is what lets extension-module imports finish
+    while Electron still holds the pipe.
+    """
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+    except (OSError, ValueError):
+        return None
+    kernel32 = ctypes.WinDLL('kernel32')
+    peek = kernel32.PeekNamedPipe
+    peek.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPVOID,
+    ]
+    peek.restype = wintypes.BOOL
+    available = wintypes.DWORD(0)
+
+    def probe():
+        if peek(handle, None, 0, None, ctypes.byref(available), None):
+            return available.value, False
+        # 管道已断开（109）或句柄已失效：都按父进程结束处理，避免空转。
+        return 0, True
+
+    return probe
 
 
 class ManagedParentMonitor:
@@ -94,8 +134,21 @@ class ManagedParentMonitor:
         except (AttributeError, OSError, ValueError) as exc:
             raise RuntimeError('managed backend requires a valid stdin pipe') from exc
 
+        # Windows: 父进程整个会话都持有管道，同步 os.read 会一直悬停在 ReadFile 上，
+        # 进而卡住 DLL 加载器（numpy 的扩展导入从 0.1 秒涨到 30 秒以上），
+        # `from main import app` 永远不返回 → 触发就绪超时。PeekNamedPipe 只探测不阻塞。
+        poll = _windows_pipe_poll(fd) if os.name == 'nt' else None
+
         def read_loop() -> None:
             while True:
+                if poll is not None:
+                    available, eof = poll()
+                    if eof:
+                        self.note_eof()
+                        return
+                    if not available:
+                        time.sleep(STDIN_POLL_SECONDS)
+                        continue
                 try:
                     # 用裸 fd 而不是 stdin.buffer.read：守护线程在解释器 finalize 时
                     # 可能仍持有 BufferedReader 锁，导致 _enter_buffered_busy 崩溃。
