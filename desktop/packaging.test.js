@@ -17,7 +17,7 @@ test('desktop package defines a safe electron-builder layout', () => {
   for (const file of ['main.js', 'preload.js', 'runtimePaths.js', 'updater-notify.js', 'update-transport.js', 'overlayInput.js', 'shortcutRegistry.js', 'bootstrap.js', 'singleInstance.js', 'log-redact.js', 'fatal-log.js', 'backend-lifecycle.js']) {
     assert.ok(build.files.includes(file), `${file} must ship inside the app`)
   }
-  for (const testOnly of ['update-fixtures.js', 'release-artifacts.js', 'release-artifacts.test.js', 'update-transport.test.js']) {
+  for (const testOnly of ['update-fixtures.js', 'release-artifacts.js', 'release-artifacts.test.js', 'verify-packaged-app.js', 'verify-packaged-app.test.js', 'update-transport.test.js']) {
     assert.ok(!build.files.includes(testOnly), `${testOnly} is test/build-only and must not ship`)
   }
   assert.strictEqual(pkg.dependencies['electron-updater'], '6.8.11', 'runtime SDK version must be pinned')

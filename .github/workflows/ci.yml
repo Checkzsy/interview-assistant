@@ -147,7 +147,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run desktop unit tests
-        run: node --test multiScreenBatch.test.js windowOptions.test.js shortcuts.test.js preload.test.js runtimePaths.test.js runtimePaths.integration.test.js packaging.test.js updater.test.js updater-ipc.test.js updater-notify.test.js updater-notification-regression.test.js updater-install-regression.test.js release-workflow.test.js bootstrap.test.js log-redact.test.js fatal-log.test.js backend-lifecycle.test.js lifecycle-wiring.test.js overlay-passthrough.test.js overlay-scroll-shortcut.test.js shortcutRegistry.test.js update-transport.test.js update-wiring.test.js release-artifacts.test.js
+        run: node --test multiScreenBatch.test.js windowOptions.test.js shortcuts.test.js preload.test.js runtimePaths.test.js runtimePaths.integration.test.js packaging.test.js updater.test.js updater-ipc.test.js updater-notify.test.js updater-notification-regression.test.js updater-install-regression.test.js release-workflow.test.js bootstrap.test.js log-redact.test.js fatal-log.test.js backend-lifecycle.test.js lifecycle-wiring.test.js overlay-passthrough.test.js overlay-scroll-shortcut.test.js shortcutRegistry.test.js update-transport.test.js update-wiring.test.js release-artifacts.test.js verify-packaged-app.test.js
 
   # ── Playwright E2E (mocked backend, no live API needed) ──
   e2e-playwright:

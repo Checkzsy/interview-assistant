@@ -85,6 +85,12 @@ jobs:
         working-directory: desktop
         run: npm run dist
 
+      - name: Verify packaged app runtime dependencies
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          node verify-packaged-app.js --version ($env:GITHUB_REF_NAME.Substring(1))
+
       - name: Validate published update metadata against the installer
         working-directory: desktop
         shell: pwsh

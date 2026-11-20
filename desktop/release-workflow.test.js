@@ -62,6 +62,24 @@ test('Windows release workflow caches and verifies the bundled whisper model', (
   assert.ok(distIndex >= 0 && verifyIndex > distIndex, 'packaged model must be verified after the installer build');
 });
 
+test('Windows release workflow validates the packaged app before publishing', () => {
+  const source = fs.readFileSync(workflowPath, 'utf8');
+  const distIndex = source.indexOf('npm run dist');
+  const gateIndex = source.indexOf('node verify-packaged-app.js');
+  const uploadIndex = source.indexOf('uses: actions/upload-artifact@v4');
+  const publishIndex = source.indexOf('softprops/action-gh-release');
+  assert.ok(distIndex >= 0, 'installer build must run');
+  assert.ok(gateIndex > distIndex, 'packaged app gate must run after the build');
+  assert.ok(uploadIndex > gateIndex, 'archive validation must precede artifact upload');
+  assert.ok(publishIndex > gateIndex, 'archive validation must precede publishing');
+  assert.match(source, /working-directory: desktop\s+shell: pwsh\s+run: \|\s+node verify-packaged-app\.js --version \(\$env:GITHUB_REF_NAME\.Substring\(1\)\)/);
+});
+
+test('desktop CI runs the packaged app gate tests explicitly', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.match(source, /node --test[^\n]*\bverify-packaged-app\.test\.js\b/);
+});
+
 test('Windows release workflow gates publishing on the artifact validator', () => {
   const source = fs.readFileSync(workflowPath, 'utf8');
 
