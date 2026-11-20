@@ -49,8 +49,28 @@ describe('GlobalShortcutsEditor', () => {
     expect(screen.getByText('显示或隐藏主窗口')).toBeInTheDocument()
     expect(screen.getByText('注册失败')).toBeInTheDocument()
     expect(screen.getByText('当前组合注册失败，请更换快捷键后重试')).toBeInTheDocument()
-    expect(screen.getAllByText('需在专注面板展开时生效')).toHaveLength(2)
-    expect(screen.getAllByText('需悬浮窗已显示时生效')).toHaveLength(2)
+    expect(screen.getAllByText('需在专注面板展开时生效')).toHaveLength(4)
+    expect(screen.getAllByText('需悬浮窗已显示时生效')).toHaveLength(5)
+  })
+
+  it('keeps native status and shows which shortcut conflicts after merging state', async () => {
+    render(<GlobalShortcutsEditor />)
+
+    await screen.findByText('隐藏/显示窗口')
+    act(() => {
+      useShortcutsStore.getState().setShortcuts({
+        hideOrShowWindow: { ...defaultShortcuts.hideOrShowWindow, status: 'registered' },
+        cancelAnswer: { ...defaultShortcuts.cancelAnswer, status: 'failed' },
+        overlayScrollNextAnswer: {
+          ...defaultShortcuts.overlayScrollNextAnswer,
+          key: defaultShortcuts.overlayNextQuestion.key,
+        },
+      })
+    })
+
+    expect(screen.getByText('已注册')).toBeInTheDocument()
+    expect(screen.getByText('当前组合注册失败，请更换快捷键后重试')).toBeInTheDocument()
+    expect(screen.getByText('与「悬浮窗下一题」冲突，请更换快捷键')).toBeInTheDocument()
   })
 
   it('ignores rapid duplicate shortcut recordings while save is pending', async () => {

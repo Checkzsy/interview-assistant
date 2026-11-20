@@ -11,7 +11,8 @@ const makeState = (over: Record<string, unknown> = {}) => ({
   publishedAt: '2026-09-24T00:00:00Z',
   checking: false,
   checkError: null,
-  download: { status: 'idle', received: 0, total: 0, error: null, downloadedPath: null },
+  download: { status: 'idle', received: 0, total: 0, error: null, downloadedPath: null, targetVersion: null, targetId: null },
+  install: { blocked: false, reason: null },
   installing: false,
   installError: null,
   ...over,
@@ -66,6 +67,21 @@ describe('UpdateCard', () => {
     await waitFor(() => expect(screen.getByText(/已是最新版本/)).toBeInTheDocument())
   })
 
+  it('keeps the new-version block after a failed install so the user can retry', async () => {
+    updaterState = makeState({
+      installError: '安装包校验失败，请重新下载',
+      download: {
+        status: 'error', received: 0, total: 0, error: '安装包校验失败，请重新下载', downloadedPath: null,
+        targetVersion: 'v1.2.0', targetId: '["1.2.0","x.exe"]',
+      },
+    })
+    setElectronAPI()
+    render(<UpdateCard />)
+    await waitFor(() => expect(screen.getByText(/发现新版本 v1\.2\.0/)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /点击下载更新/ })).toBeInTheDocument()
+    expect(screen.getAllByText(/安装包校验失败，请重新下载/).length).toBeGreaterThan(0)
+  })
+
   it('triggers download on button click and progresses to install', async () => {
     updaterState = makeState()
     setElectronAPI()
@@ -91,7 +107,10 @@ describe('UpdateCard install mode', () => {
 
   const setElectronAPI = () => {
     const state = makeState({
-      download: { status: 'done', received: 1024, total: 1024, error: null, downloadedPath: 'C:/x.exe' },
+      download: {
+        status: 'done', received: 1024, total: 1024, error: null, downloadedPath: 'C:/x.exe',
+        targetVersion: 'v1.2.0', targetId: '["1.2.0","x.exe"]',
+      },
     })
     const api = {
       getUpdaterState: vi.fn(async () => state),
@@ -103,6 +122,35 @@ describe('UpdateCard install mode', () => {
     ;(window as any).electronAPI = api
     return api
   }
+
+  it('labels the install button with the version that was actually downloaded', async () => {
+    setElectronAPI()
+    render(<UpdateCard />)
+    await screen.findByRole('button', { name: /安装已下载的 v1\.2\.0/ })
+  })
+
+  it('never offers install when the downloaded package is for a different target', async () => {
+    const state = makeState({
+      download: {
+        status: 'done', received: 1024, total: 1024, error: null, downloadedPath: 'C:/x.exe',
+        // 下载的是 v1.1.9，但当前显示的新版本是 v1.2.0：不能显示 B 却安装 A。
+        targetVersion: 'v1.1.9', targetId: '["1.1.9","x.exe"]',
+      },
+      install: { blocked: true, reason: '当前安装包不是已检查的版本' },
+    })
+    const api = {
+      getUpdaterState: vi.fn(async () => state),
+      checkForUpdate: vi.fn(async () => state),
+      downloadUpdate: vi.fn(async () => state),
+      installUpdate: vi.fn(async () => ({ ok: true })),
+      onUpdaterState: () => () => {},
+    }
+    ;(window as any).electronAPI = api
+    render(<UpdateCard />)
+    await screen.findByRole('button', { name: /点击下载更新/ })
+    expect(screen.queryByRole('button', { name: /安装已下载/ })).not.toBeInTheDocument()
+    expect(screen.getByText('当前安装包不是已检查的版本')).toBeInTheDocument()
+  })
 
   it('defaults to silent in-place upgrade', async () => {
     const api = setElectronAPI()

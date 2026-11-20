@@ -5,8 +5,8 @@ const path = require('node:path')
 
 test('desktop package defines a safe electron-builder layout', () => {
   const pkg = require('./package.json')
-  assert.strictEqual(pkg.scripts.dist, 'npm run build:backend && electron-builder --win nsis --x64')
-  assert.strictEqual(pkg.scripts['dist:dir'], 'npm run build:backend && electron-builder --win --x64 --dir')
+  assert.strictEqual(pkg.scripts.dist, 'npm run build:backend && electron-builder --win nsis --x64 --publish never')
+  assert.strictEqual(pkg.scripts['dist:dir'], 'npm run build:backend && electron-builder --win --x64 --dir --publish never')
   assert.ok(pkg.scripts['build:backend'])
 
   const build = pkg.build
@@ -14,9 +14,19 @@ test('desktop package defines a safe electron-builder layout', () => {
   assert.strictEqual(build.appId, 'com.interviewassistant.desktop')
   assert.strictEqual(build.productName, 'Interview Assistant')
   assert.deepStrictEqual(build.directories, { output: 'dist' })
-  for (const file of ['main.js', 'preload.js', 'runtimePaths.js', 'updater-notify.js']) {
-    assert.ok(build.files.includes(file))
+  for (const file of ['main.js', 'preload.js', 'runtimePaths.js', 'updater-notify.js', 'update-transport.js', 'overlayInput.js', 'shortcutRegistry.js', 'bootstrap.js', 'singleInstance.js', 'log-redact.js', 'fatal-log.js', 'backend-lifecycle.js']) {
+    assert.ok(build.files.includes(file), `${file} must ship inside the app`)
   }
+  for (const testOnly of ['update-fixtures.js', 'release-artifacts.js', 'release-artifacts.test.js', 'verify-packaged-app.js', 'verify-packaged-app.test.js', 'update-transport.test.js']) {
+    assert.ok(!build.files.includes(testOnly), `${testOnly} is test/build-only and must not ship`)
+  }
+  assert.strictEqual(pkg.dependencies['electron-updater'], '6.8.11', 'runtime SDK version must be pinned')
+  assert.strictEqual(pkg.devDependencies['electron-builder'], '26.15.3', 'blockmap validator pins the builder that wrote the map')
+
+  // GitHub publish target + a fixed artifact name keep metadata, upload and the
+  // actual file name in agreement (the SDK resolves latest.yml by that name).
+  assert.deepStrictEqual(build.publish, [{ provider: 'github', owner: 'Checkzsy', repo: 'interview-assistant' }])
+  assert.strictEqual(build.nsis.artifactName, 'Interview.Assistant.Setup.${version}.exe')
 
   const resources = build.extraResources
   assert.ok(resources.some((item) => item.to === 'backend'))
@@ -97,6 +107,33 @@ test('both dist entry points cannot skip the model staging step', () => {
   const build = pkg.scripts['build:backend']
   assert.ok(build.includes('npm run bundle:whisper'))
   assert.ok(build.includes('npm run verify:whisper'))
+})
+
+test('every first-party module transitively required by the entry points ships', () => {
+  // Walking the real require graph stops the failure mode where a new helper
+  // (e.g. update-transport.js) is required by main.js but never packaged, so the
+  // app only breaks in a built installer.
+  const pkg = require('./package.json')
+  const packaged = new Set(pkg.build.files)
+  // electron-builder always rewrites package.json into the asar itself.
+  packaged.add('package.json')
+  const seen = new Set()
+  const missing = []
+  const queue = [pkg.main, 'preload.js']
+  while (queue.length) {
+    const name = queue.shift()
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (!packaged.has(name)) missing.push(name)
+    if (!name.endsWith('.js')) continue
+    const source = fs.readFileSync(path.join(__dirname, name), 'utf8')
+    for (const match of source.matchAll(/require\(['"]\.\/([^'"]+)['"]\)/g)) {
+      const dep = path.extname(match[1]) ? match[1] : `${match[1]}.js`
+      if (!queue.includes(dep)) queue.push(dep)
+    }
+  }
+  assert.deepStrictEqual(missing, [], 'build.files must include every first-party runtime module')
+  assert.ok(seen.has('update-transport.js'), 'updater transport must be reachable from the packaged entry points')
 })
 
 test('bundled model weights stay out of git', () => {

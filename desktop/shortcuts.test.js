@@ -51,6 +51,37 @@ test('validateShortcutMap rejects duplicate keys', () => {
   assert.match(result.error, /重复/);
 });
 
+test('new overlay actions keep distinct defaults and merge existing conflicts per shortcut', () => {
+  const defaults = createShortcutState();
+  const overlayActions = [
+    'overlayScrollPrevAnswer',
+    'overlayScrollNextAnswer',
+    'overlayScrollPrevQuestion',
+    'overlayScrollNextQuestion',
+    'toggleOverlayPassthrough',
+  ];
+  const keys = overlayActions.map((action) => defaults[action].key);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(defaults.toggleOverlayPassthrough.key, 'CommandOrControl+1');
+  assert.equal(defaults.overlayScrollPrevAnswer.key, 'CommandOrControl+Shift+Up');
+  assert.equal(defaults.overlayScrollNextQuestion.key, 'CommandOrControl+Shift+Right');
+  assert.equal(isValidShortcutKey(defaults.overlayScrollPrevQuestion.key), true);
+  assert.equal(isValidShortcutKey(defaults.toggleOverlayPassthrough.key), true);
+  assert.equal(validateShortcutMap(defaults).ok, true);
+
+  // 旧配置里把 overlay 下一题改成和硬清空同键：迁移后只允许这一对既有冲突留存。
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-shortcuts-conflict-'));
+  fs.writeFileSync(
+    path.join(tmpDir, 'shortcuts.json'),
+    JSON.stringify({ overlayNextQuestion: { key: 'CommandOrControl+.' } }),
+  );
+  const loaded = loadShortcutConfig(makeFakeApp(tmpDir));
+  assert.equal(loaded.overlayNextQuestion.key, 'CommandOrControl+.');
+  assert.equal(loaded.hardClearSession.key, 'CommandOrControl+.');
+  assert.equal(validateShortcutMap(loaded).ok, false);
+  assert.equal(loaded.overlayScrollPrevAnswer.key, 'CommandOrControl+Shift+Up');
+});
+
 test('load and save shortcut config roundtrip', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ia-shortcuts-'));
   const app = makeFakeApp(tmpDir);

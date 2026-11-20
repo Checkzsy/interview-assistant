@@ -21,16 +21,26 @@ const SHORTCUT_OPERATION_HINTS: Record<ShortcutAction, string> = {
   focusNextTab: '切换到专注面板下一栏',
   overlayPrevQuestion: '悬浮窗中切换到上一题',
   overlayNextQuestion: '悬浮窗中切换到下一题',
+  overlayScrollPrevAnswer: '向上滚动答案（所有悬浮窗模式）',
+  overlayScrollNextAnswer: '向下滚动答案（所有悬浮窗模式）',
+  overlayScrollPrevQuestion: '向上滚动题目（仅专注面板）',
+  overlayScrollNextQuestion: '向下滚动题目（仅专注面板）',
+  toggleOverlayPassthrough: '切换鼠标穿透；再次按下或显示窗口恢复鼠标交互',
   askScreenForceThink: '强制思考模式截图审题',
   askScreenForceNoThink: '强制非思考模式截图审题',
   toggleThinkMode: '切换思考模式',
 }
 
-const FOCUS_MODE_ACTIONS = new Set<ShortcutAction>(['focusPrevTab', 'focusNextTab'])
+const FOCUS_MODE_ACTIONS = new Set<ShortcutAction>([
+  'focusPrevTab', 'focusNextTab', 'overlayScrollPrevQuestion', 'overlayScrollNextQuestion',
+])
 const OVERLAY_VISIBLE_ACTIONS = new Set<ShortcutAction>([
   'cancelAnswer',
   'overlayPrevQuestion',
   'overlayNextQuestion',
+  'overlayScrollPrevAnswer',
+  'overlayScrollNextAnswer',
+  'toggleOverlayPassthrough',
 ])
 
 export default function GlobalShortcutsEditor() {
@@ -149,7 +159,11 @@ export default function GlobalShortcutsEditor() {
                   {SHORTCUT_OPERATION_HINTS[action]}
                 </div>
                 {shortcut.status === 'failed' && (
-                  <div className="text-[10px] mt-0.5 text-accent-red">当前组合注册失败，请更换快捷键后重试</div>
+                  <div className="text-[10px] mt-0.5 text-accent-red">
+                    {shortcut.conflict
+                      ? `与「${shortcuts[shortcut.conflict]?.label ?? shortcut.conflict}」冲突，请更换快捷键`
+                      : '当前组合注册失败，请更换快捷键后重试'}
+                  </div>
                 )}
                 {shortcut.status === 'available' && FOCUS_MODE_ACTIONS.has(action) && (
                   <div className="text-[10px] mt-0.5 text-text-muted">需在专注面板展开时生效</div>

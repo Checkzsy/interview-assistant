@@ -33,6 +33,7 @@ declare global {
       onShortcuts?: (callback: (payload: Record<string, Record<string, unknown>> | undefined) => void) => (() => void)
       onFocusTabCommand?: (callback: (direction: 'prev' | 'next') => void) => (() => void)
       onOverlayQuestionCommand?: (callback: (direction: 'prev' | 'next') => void) => (() => void)
+      onOverlayScrollCommand?: (callback: (payload: { target: 'answer' | 'question'; direction: 'up' | 'down' }) => void) => (() => void)
       onDesktopToast?: (callback: (payload: { message: string; level?: 'info' | 'success' | 'warn' | 'error' } | string) => void) => (() => void)
       onConfigUpdated?: (callback: (payload: Record<string, unknown>) => void) => (() => void)
       removeOverlayStateListener?: (listener?: (...args: unknown[]) => void) => void
@@ -63,7 +64,17 @@ declare global {
     publishedAt: string | null
     checking: boolean
     checkError: string | null
-    download: { status: 'idle' | 'downloading' | 'done' | 'error'; received: number; total: number; error: string | null; downloadedPath: string | null }
+    download: {
+      status: 'idle' | 'downloading' | 'done' | 'error'
+      received: number
+      total: number
+      error: string | null
+      downloadedPath: string | null
+      /** 本次已下载/正在下载的目标版本；与 latest 不一致时不得安装 */
+      targetVersion: string | null
+      targetId: string | null
+    }
+    install: { blocked: boolean; reason: string | null }
     installing: boolean
     installError: string | null
   }

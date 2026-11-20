@@ -1,20 +1,21 @@
 {
   "name": "interview-assistant-desktop",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "description": "智能面试学习辅助助手 - Electron 桌面端",
   "appDisplayName": "智能面试学习辅助助手",
-  "main": "main.js",
+  "main": "bootstrap.js",
   "scripts": {
     "start": "electron .",
-    "dist": "npm run build:backend && electron-builder --win nsis --x64",
-    "dist:dir": "npm run build:backend && electron-builder --win --x64 --dir",
+    "dist": "npm run build:backend && electron-builder --win nsis --x64 --publish never",
+    "dist:dir": "npm run build:backend && electron-builder --win --x64 --dir --publish never",
     "bundle:whisper": "python \"%CD%\\..\\backend\\scripts\\bundle_whisper_base.py\" stage --dest \"%CD%\\..\\backend\\assets\\whisper-base\"",
     "verify:whisper": "python \"%CD%\\..\\backend\\scripts\\bundle_whisper_base.py\" verify-packaged --name backend --root build",
     "build:backend": "npm run bundle:whisper && python -m PyInstaller --noconfirm --clean --name backend --paths \"%CD%\\..\\backend\" --add-data \"%CD%\\..\\backend\\assets;assets\" --collect-all faster_whisper --collect-submodules faster_whisper --collect-all soundcard --collect-all comtypes \"%CD%\\..\\backend\\entrypoint.py\" --exclude-module torch --exclude-module tensorflow --exclude-module pandas --exclude-module scipy --exclude-module matplotlib --exclude-module IPython --exclude-module jedi --exclude-module parso --exclude-module notebook --exclude-module jupyter --exclude-module jupyterlab --exclude-module tkinter --exclude-module PyQt5 --exclude-module PySide2 --exclude-module pytest --exclude-module PyInstaller --exclude-module black --exclude-module flake8 --exclude-module ruff --distpath build --workpath build/pyinstaller --specpath build && npm run verify:whisper"
   },
   "devDependencies": {
     "electron": "^41.3.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "26.15.3",
+    "js-yaml": "4.3.2"
   },
   "build": {
     "appId": "com.interviewassistant.desktop",
@@ -23,17 +24,25 @@
       "output": "dist"
     },
     "files": [
+      "bootstrap.js",
       "main.js",
       "preload.js",
+      "singleInstance.js",
+      "log-redact.js",
+      "fatal-log.js",
+      "backend-lifecycle.js",
       "captureCapability.js",
       "shortcuts.js",
       "windowOptions.js",
       "multiScreenBatch.js",
+      "overlayInput.js",
+      "shortcutRegistry.js",
       "runtimePaths.js",
       "app-title.json",
       "icon.png",
       "updater.js",
       "updater-ipc.js",
+      "update-transport.js",
       "updater-notify.js"
     ],
     "extraResources": [
@@ -59,8 +68,19 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "include": "nsis/installer.nsh"
-    }
+      "include": "nsis/installer.nsh",
+      "artifactName": "Interview.Assistant.Setup.${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Checkzsy",
+        "repo": "interview-assistant"
+      }
+    ]
   },
-  "author": "AI Interview Assistant Contributors"
+  "author": "AI Interview Assistant Contributors",
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  }
 }

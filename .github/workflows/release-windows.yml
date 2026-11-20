@@ -85,6 +85,20 @@ jobs:
         working-directory: desktop
         run: npm run dist
 
+      - name: Verify packaged app runtime dependencies
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          node verify-packaged-app.js --version ($env:GITHUB_REF_NAME.Substring(1))
+
+      - name: Validate published update metadata against the installer
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          # Recomputes latest.yml/blockmap checksums from the real EXE bytes before
+          # anything is uploaded; a same-size map for other bytes fails here.
+          node release-artifacts.js --version ($env:GITHUB_REF_NAME.Substring(1))
+
       - name: Verify the installer contains the whisper model
         shell: pwsh
         run: |
@@ -112,7 +126,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: interview-assistant-windows-${{ github.ref_name }}
-          path: desktop/dist/*.exe
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.exe.blockmap
+            desktop/dist/latest.yml
           if-no-files-found: error
           retention-days: 30
 
@@ -120,6 +137,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: desktop/dist/*.exe
+          files: |
+            desktop/dist/*.exe
+            desktop/dist/*.exe.blockmap
+            desktop/dist/latest.yml
           fail_on_unmatched_files: true
           generate_release_notes: true

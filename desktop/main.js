@@ -38,6 +38,7 @@ app.commandLine.appendSwitch(
   'CalculateNativeWinOcclusion,IOSurfaceCapturer,DesktopCaptureMacV2',
 );
 const {
+  LEGACY_SHORTCUT_ACTIONS,
   ShortcutStatus,
   createShortcutState,
   loadShortcutConfig,
@@ -54,8 +55,12 @@ const {
 } = require('./windowOptions');
 const { createMultiScreenBatch } = require('./multiScreenBatch');
 const { buildBackendEnvironment, resolveRuntimePaths, resolveServerPort } = require('./runtimePaths');
+const { createBackendLifecycle } = require('./backend-lifecycle');
+const { bootstrapGate, setRevealTarget } = require('./singleInstance');
 const { createUpdateController } = require('./updater-ipc');
 const { createNotifyTracker } = require('./updater-notify');
+const { createOverlayCommandSender, createOverlayPassthroughController } = require('./overlayInput');
+const { createShortcutRegistry } = require('./shortcutRegistry');
 
 const pkg = require('./package.json');
 
@@ -96,7 +101,8 @@ let SERVER_URL = null;
 let mainWindow = null;
 let overlayWindow = null;
 let tray = null;
-let pythonProcess = null;
+// 托管后端生命线：唯一有效的 child 引用、就绪标记、退出收敛都在这个控制器里。
+const backend = createBackendLifecycle();
 let isQuitting = false;
 let shortcuts = {};
 let _overlayDragging = false;
@@ -127,8 +133,8 @@ const FOCUS_OVERLAY_MARGIN = 14;
 
 let _frontReassertTimer = null;
 const FRONT_REASSERT_LEVEL = 1;
-const FOCUS_OVERLAY_SHORTCUT_ACTIONS = new Set(['focusPrevTab', 'focusNextTab']);
-const VISIBLE_OVERLAY_SHORTCUT_ACTIONS = new Set(['cancelAnswer', 'overlayPrevQuestion', 'overlayNextQuestion']);
+const FOCUS_OVERLAY_SHORTCUT_ACTIONS = new Set(['focusPrevTab', 'focusNextTab', 'overlayScrollPrevQuestion', 'overlayScrollNextQuestion']);
+const VISIBLE_OVERLAY_SHORTCUT_ACTIONS = new Set(['cancelAnswer', 'overlayPrevQuestion', 'overlayNextQuestion', 'overlayScrollPrevAnswer', 'overlayScrollNextAnswer', 'toggleOverlayPassthrough']);
 const FRONT_REASSERT_DURATION = 5000;
 const FRONT_REASSERT_INTERVAL = 500;
 
@@ -179,6 +185,10 @@ function applyMainWindowProtection(win) {
 }
 
 let trayProtectionItem = null;
+let trayPassthroughItem = null;
+let shortcutRegistry = null;
+let overlayPassthroughController = null;
+let overlayCommands = null;
 
 function setMainWindowContentProtection(enabled) {
   const next = Boolean(enabled);
@@ -215,14 +225,65 @@ function recenterWindowIfOffscreen(win) {
 // 所有「把主窗显示给用户」的入口统一走这里：
 // 结束预热态 + 保证窗口在屏内 + 补保护位 + 抢焦点。
 // 分散调用 mainWindow.show() 的写法在屏外预热方案下会漏掉 recenter，窗口就永久看不见了。
-function revealMainWindow({ focus = true } = {}) {
+function revealMainWindowNow({ focus = true, restoreOverlayInput = true } = {}) {
+  if (restoreOverlayInput && overlayPassthroughController?.isEnabled()) {
+    overlayPassthroughController.restoreBeforeReveal();
+  }
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // 非 Windows 下隐藏/最小化过的窗口直接 show() 不会恢复；先 restore 再走统一显示路径。
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow._preheatPending = false;
   applyMainWindowProtection(mainWindow);
   recenterWindowIfOffscreen(mainWindow);
   mainWindow.show();
   if (focus) mainWindow.focus();
 }
+
+// 第二实例/托盘等「显示窗口」请求可能早于首帧安全：先由闸门暂存，预热完成后再消费一次。
+function revealMainWindow(options) {
+  return bootstrapGate.reveal(() => revealMainWindowNow(options));
+}
+
+// A6：穿透状态瞬态、不落盘。开关前要求 overlay 可见且可用、恢复键真的由本进程注册成功；
+// native 调用失败时不谎报开启；恢复失败则销毁窗口，避免“界面说关了、实际仍穿透”。
+overlayPassthroughController = createOverlayPassthroughController({
+  getOverlayWindow: () => overlayWindow,
+  isOverlayVisible: () => Boolean(lastOverlayState?.visible) && Boolean(overlayWindow?._overlayReady),
+  isRecoveryShortcutOwned: () => shortcutRegistry?.owns('toggleOverlayPassthrough'),
+  onChange: (enabled) => {
+    syncOverlayPassthroughMenu();
+    if (enabled) {
+      notifyDesktopToast('悬浮窗已鼠标穿透，再次按下恢复键或显示窗口可恢复', 'info');
+    }
+  },
+  onUnavailable: (message) => notifyDesktopToast(message, 'error'),
+});
+
+// A5：滚动命令与既有导航共用同一发送出口，作用域在 overlayInput 集中判断。
+overlayCommands = createOverlayCommandSender({
+  getOverlayWindow: () => overlayWindow,
+  isOverlayVisible: () => Boolean(lastOverlayState?.visible),
+  isFocusOverlayActive: () => isFocusOverlayActive(),
+});
+
+// 托盘原生复选项：不依赖 renderer，状态始终回读 controller 的真实 native 结果。
+// renderer 掉线时仍可在这里关闭穿透。
+function syncOverlayPassthroughMenu() {
+  if (!trayPassthroughItem) return;
+  const enabled = Boolean(overlayPassthroughController?.isEnabled());
+  const win = overlayWindow && !overlayWindow.isDestroyed() ? overlayWindow : null;
+  const canEnable = Boolean(
+    win
+    && !win._overlayInputFaulted
+    && win._overlayReady
+    && lastOverlayState?.visible
+    && shortcutRegistry?.owns('toggleOverlayPassthrough'),
+  );
+  trayPassthroughItem.checked = enabled;
+  trayPassthroughItem.enabled = enabled || canEnable;
+}
+
+setRevealTarget(() => revealMainWindow());
 
 // 启动预热：窗口先在所有显示器之外完成首帧合成。
 // SetWindowDisplayAffinity 是同步调用，但窗口从隐藏到可见的第一次 DWM 合成
@@ -396,23 +457,21 @@ function createTrayIcon() {
   return canvas;
 }
 
-function waitForServer(timeout = 40000) {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      const req = http.get(`${SERVER_URL}/api/options`, { timeout: 1000 }, (res) => {
-        if (res.statusCode === 200) return resolve();
-        retry();
-      });
-      req.on('error', retry);
-      req.on('timeout', () => { req.destroy(); retry(); });
-    };
-    const retry = () => {
-      if (Date.now() - start > timeout) return reject(new Error('Server start timeout'));
-      setTimeout(check, 300);
-    };
-    check();
-  });
+// 启动失败统一走这里：给用户一句可执行的提示，然后安全退出。
+function failStartup(reason) {
+  console.error('Failed to start backend:', reason);
+  // 启动失败可能发生在主窗创建之前；此时也必须让用户看到可理解的提示。
+  // 固定文案，不拼接原始错误，避免泄露路径/令牌等细节。
+  const { dialog } = require('electron');
+  dialog.showErrorBox(
+    '应用无法启动',
+    '后台服务没能正常启动。\n\n' +
+      '请退出应用后重新打开；若问题持续，可能是端口被占用或安全软件拦截，' +
+      '请关闭占用端口的程序或重启电脑后再试。',
+  );
+  isQuitting = true;
+  backend.beginShutdown();
+  backend.shutdown().finally(() => app.quit());
 }
 
 function startPythonBackend() {
@@ -423,29 +482,29 @@ function startPythonBackend() {
     : process.platform === 'win32' ? 'python' : 'python3';
   const args = packagedExecutable
     ? []
-    : [
-        RUNTIME_PATHS.startScript,
-        '--mode', 'network',
-        '--no-build',
-        '--port', String(PORT),
-      ];
-  pythonProcess = spawn(command, args, {
+    : backend.buildDevArgs({ startScript: RUNTIME_PATHS.startScript, port: PORT });
+  const launchId = backend.newLaunchId();
+
+  const child = spawn(command, args, backend.buildSpawnOptions({
     cwd: ROOT,
-    stdio: ['ignore', 'pipe', 'pipe'],
     env: buildBackendEnvironment(RUNTIME_PATHS, {
       ...process.env,
       PORT: String(PORT),
+      IA_BACKEND_LAUNCH_ID: launchId,
     }),
-    windowsHide: true,
-  });
+  }));
+  backend.attach(child, { launchId });
 
-  relayChildOutput(pythonProcess.stdout, process.stdout, '[py] ');
-  relayChildOutput(pythonProcess.stderr, process.stderr, '[py] ');
-  pythonProcess.on('close', (code) => {
-    console.log(`[py] exited with code ${code}`);
-    pythonProcess = null;
+  // 就绪只认这个 child 自己 stdout 上的 launchId 标记；
+  // 端口上另有程序应答 /api/options 不能说明是我们的后端。
+  relayChildOutput(child.stdout, process.stdout, '[py] ', {
+    onLine: (line) => { backend.acceptMarker(child, line); },
+  });
+  relayChildOutput(child.stderr, process.stderr, '[py] ');
+
+  backend.onUnexpectedExit(() => {
     if (!isQuitting) {
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         const { dialog } = require('electron');
         dialog.showErrorBox(
           '后台服务已停止',
@@ -456,6 +515,8 @@ function startPythonBackend() {
       app.quit();
     }
   });
+
+  return backend.waitForReady();
 }
 
 function createWindow() {
@@ -500,6 +561,7 @@ function createWindow() {
     if (!mainWindow || mainWindow.isDestroyed() || !mainWindow._preheatPending) return;
     mainWindow._preheatPending = false;
     if (mainWindow.isVisible()) recenterWindowIfOffscreen(mainWindow);
+    openRevealGate();
   }, 15000);
 
   // 每次启动清除缓存，确保加载到最新的前端构建（避免设置里识别引擎等不更新）
@@ -513,10 +575,17 @@ function createWindow() {
     mainWindow.setTitle(APP_DISPLAY_NAME);
   });
 
+  const openRevealGate = () => {
+    // 首帧已安全：放行此前暂存的「显示窗口」请求，之后请求即时执行。
+    bootstrapGate.open();
+    bootstrapGate.requestPending();
+  };
+
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (!isWindows) {
       mainWindow.show();
+      openRevealGate();
       return;
     }
     // 屏外预热：先在不可见区域 showInactive，让 DWM 在受保护状态下建立首帧合成层
@@ -528,6 +597,7 @@ function createWindow() {
       recenterWindowIfOffscreen(mainWindow);
       mainWindow._preheatPending = false;
       mainWindow.focus();
+      openRevealGate();
     }, 80);
   });
 
@@ -607,6 +677,19 @@ function createOverlayWindow() {
     overlayWindow.setFocusable(false);
     overlayWindow.setAlwaysOnTop(true, 'screen-saver', FRONT_REASSERT_LEVEL);
   });
+  // reload / 重新导航是生命周期转换：先关闭穿透再让新 renderer 接管，避免旧状态残留。
+  overlayWindow.webContents.on('did-start-loading', () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayWindow._overlayReady = false;
+    overlayPassthroughController.setEnabled(false);
+    syncOverlayPassthroughMenu();
+  });
+  overlayWindow.webContents.on('render-process-gone', () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    // 保留当前穿透状态，托盘复选项仍可恢复；但不能再从这个窗口开启。
+    overlayWindow._overlayReady = false;
+    syncOverlayPassthroughMenu();
+  });
   overlayWindow.loadURL(`${SERVER_URL}?overlay=1`);
   overlayWindow.webContents.on('did-finish-load', () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -618,6 +701,7 @@ function createOverlayWindow() {
     setTimeout(() => {
       if (!overlayWindow || overlayWindow.isDestroyed()) return;
       overlayWindow._overlayReady = true;
+      syncOverlayPassthroughMenu();
       if (consumePendingOverlayShow(overlayWindow, lastOverlayState?.visible)) {
         showOverlayWindow();
       }
@@ -630,7 +714,17 @@ function createOverlayWindow() {
   });
 
   overlayWindow.on('closed', () => {
+    // 窗口已销毁后不再碰 native；同时清理瞬态状态和恢复键所有权。
+    shortcutRegistry.unregister('toggleOverlayPassthrough');
     overlayWindow = null;
+    overlayPassthroughController.setEnabled(false);
+    // 销毁属于明确生命周期转换：同步清 visible 与作用域，避免主窗继续以为悬浮窗可见。
+    if (lastOverlayState?.visible) {
+      sendOverlayState({ ...lastOverlayState, visible: false });
+      syncFocusOverlayShortcuts();
+    } else {
+      syncOverlayPassthroughMenu();
+    }
     _overlayDragging = false;
     if (_blurTimer) { clearTimeout(_blurTimer); _blurTimer = null; }
     if (_frontReassertTimer) { clearInterval(_frontReassertTimer); _frontReassertTimer = null; }
@@ -652,6 +746,7 @@ function createOverlayWindow() {
 
 function sendOverlayState(payload) {
   lastOverlayState = payload;
+  syncOverlayPassthroughMenu();
   [mainWindow, overlayWindow].forEach((win) => {
     if (!win || win.isDestroyed()) return;
     win.webContents.send('overlay-state', payload);
@@ -659,6 +754,7 @@ function sendOverlayState(payload) {
 }
 
 function sendShortcutsState() {
+  syncOverlayPassthroughMenu();
   [mainWindow, overlayWindow].forEach((win) => {
     if (!win || win.isDestroyed()) return;
     win.webContents.send('shortcuts-state', shortcuts);
@@ -667,6 +763,11 @@ function sendShortcutsState() {
 
 function showOverlayWindow() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // 穿透恢复失败的窗口不可复用：仍在穿透时 show 出来只会吞掉用户点击。
+  if (overlayWindow._overlayInputFaulted) {
+    notifyDesktopToast('悬浮窗当前无法恢复鼠标交互，请重新打开悬浮窗。', 'error');
+    return;
+  }
   if (!lastOverlayState?.visible) {
     overlayWindow._pendingShow = false;
     overlayWindow.hide();
@@ -827,12 +928,24 @@ function createTray() {
         setMainWindowContentProtection(menuItem.checked);
       },
     },
+    {
+      label: '悬浮窗鼠标穿透',
+      type: 'checkbox',
+      checked: false,
+      enabled: false,
+      click: (menuItem) => {
+        overlayPassthroughController.setEnabled(menuItem.checked);
+        syncOverlayPassthroughMenu();
+      },
+    },
     { type: 'separator' },
     { label: '退出', click: () => { isQuitting = true; app.quit(); } },
   ]);
 
   trayProtectionItem = contextMenu.items.find((item) => item.label === '屏幕共享隐身') || null;
   if (trayProtectionItem) trayProtectionItem.checked = mainWindow?._contentProtection !== false;
+  trayPassthroughItem = contextMenu.items.find((item) => item.label === '悬浮窗鼠标穿透') || null;
+  syncOverlayPassthroughMenu();
 
   tray.setContextMenu(contextMenu);
   tray.on('click', () => revealMainWindow());
@@ -852,13 +965,37 @@ function isOverlayShortcutActive(action) {
   return true;
 }
 
-function registerManagedShortcut(shortcut) {
+// 快捷键注册的所有权唯一来源：只注销本动作真正注册成功的键，绝不按配置字符串 unregister。
+shortcutRegistry = createShortcutRegistry(globalShortcut);
+
+function registerManagedShortcut(shortcut, state = shortcuts) {
   const callback = shortcutCallbacks[shortcut.action];
   if (!callback) {
     shortcut.status = ShortcutStatus.Available;
     return false;
   }
-  if (globalShortcut.register(shortcut.key, callback)) {
+  const conflicts = Object.values(state).filter((other) => (
+    other.action !== shortcut.action && other.key === shortcut.key
+  ));
+  const prioritizedConflict = conflicts.find((other) => (
+    LEGACY_SHORTCUT_ACTIONS.has(other.action) && !LEGACY_SHORTCUT_ACTIONS.has(shortcut.action)
+  )) ?? conflicts.find((other) => (
+    LEGACY_SHORTCUT_ACTIONS.has(other.action) === LEGACY_SHORTCUT_ACTIONS.has(shortcut.action)
+    && Object.keys(state).indexOf(other.action) < Object.keys(state).indexOf(shortcut.action)
+  ));
+  if (prioritizedConflict) {
+    shortcutRegistry.unregister(shortcut.action);
+    shortcut.status = ShortcutStatus.Failed;
+    shortcut.conflict = prioritizedConflict.action;
+    return false;
+  }
+  delete shortcut.conflict;
+  if (!isOverlayShortcutActive(shortcut.action)) {
+    shortcutRegistry.unregister(shortcut.action);
+    shortcut.status = ShortcutStatus.Available;
+    return true;
+  }
+  if (shortcutRegistry.register(shortcut.action, shortcut.key, callback)) {
     shortcut.status = ShortcutStatus.Registered;
     return true;
   }
@@ -868,82 +1005,69 @@ function registerManagedShortcut(shortcut) {
 
 function registerShortcuts() {
   shortcuts = loadShortcutConfig(app);
-  Object.values(shortcuts).forEach((shortcut) => {
-    if (!isOverlayShortcutActive(shortcut.action)) {
-      shortcut.status = ShortcutStatus.Available;
-      return;
-    }
-    registerManagedShortcut(shortcut);
-  });
+  Object.values(shortcuts).forEach((shortcut) => registerManagedShortcut(shortcut));
   syncFocusOverlayShortcuts();
+  syncOverlayPassthroughMenu();
 }
 
 function unregisterShortcut(action) {
   const shortcut = shortcuts[action];
   if (!shortcut) return;
-  globalShortcut.unregister(shortcut.key);
-  shortcut.status = ShortcutStatus.Available;
+  shortcutRegistry.unregister(action);
+  if (shortcut.conflict) {
+    shortcut.status = ShortcutStatus.Failed;
+  } else {
+    shortcut.status = ShortcutStatus.Available;
+  }
 }
 
 function unregisterAllManagedShortcuts() {
-  Object.keys(shortcuts).forEach((action) => unregisterShortcut(action));
+  const result = overlayPassthroughController.setEnabled(false);
+  // native 恢复/销毁都失败时不能释放唯一恢复键。
+  if (!result.ok && result.enabled) return false;
+  shortcutRegistry.unregisterAll();
+  return true;
 }
 
 function syncFocusOverlayShortcuts() {
   for (const action of [...FOCUS_OVERLAY_SHORTCUT_ACTIONS, ...VISIBLE_OVERLAY_SHORTCUT_ACTIONS]) {
     const shortcut = shortcuts[action];
     if (!shortcut) continue;
-    if (isOverlayShortcutActive(action)) {
-      if (shortcut.status !== ShortcutStatus.Registered) registerManagedShortcut(shortcut);
-    } else if (shortcut.status === ShortcutStatus.Registered || shortcut.status === ShortcutStatus.Failed) {
-      unregisterShortcut(action);
+    if (action === 'toggleOverlayPassthrough' && overlayPassthroughController.isEnabled()) {
+      // 不可恢复的窗口仍需保留唯一恢复键，禁止 scope 注销。
+      continue;
     }
+    registerManagedShortcut(shortcut);
   }
   sendShortcutsState();
 }
 
 function registerShortcutSet(nextShortcuts) {
-  const validation = validateShortcutMap(nextShortcuts);
+  const validation = validateShortcutMap(nextShortcuts, shortcuts);
   if (!validation.ok) {
     return { ok: false, error: validation.error, shortcuts };
   }
 
   const prevShortcuts = shortcuts;
-  unregisterAllManagedShortcuts();
+  if (!unregisterAllManagedShortcuts()) {
+    return { ok: false, error: '悬浮窗鼠标恢复失败，无法更换恢复键', shortcuts };
+  }
 
   const nextState = JSON.parse(JSON.stringify(nextShortcuts));
   let failedKey = null;
   for (const shortcut of Object.values(nextState)) {
-    if (!isOverlayShortcutActive(shortcut.action)) {
-      shortcut.status = ShortcutStatus.Available;
-      continue;
-    }
-    const callback = shortcutCallbacks[shortcut.action];
-    if (!callback) continue;
-    if (globalShortcut.register(shortcut.key, callback)) {
-      shortcut.status = ShortcutStatus.Registered;
-    } else {
-      shortcut.status = ShortcutStatus.Failed;
+    const registered = registerManagedShortcut(shortcut, nextState);
+    if (!registered && !shortcut.conflict) {
       failedKey = shortcut.key;
       break;
     }
   }
 
   if (failedKey) {
-    Object.values(nextState).forEach((shortcut) => globalShortcut.unregister(shortcut.key));
+    shortcutRegistry.unregisterAll();
     shortcuts = prevShortcuts;
     Object.values(shortcuts).forEach((shortcut) => {
-      if (!isOverlayShortcutActive(shortcut.action)) {
-        shortcut.status = ShortcutStatus.Available;
-        return;
-      }
-      const callback = shortcutCallbacks[shortcut.action];
-      if (!callback) return;
-      if (globalShortcut.register(shortcut.key, callback)) {
-        shortcut.status = ShortcutStatus.Registered;
-      } else {
-        shortcut.status = ShortcutStatus.Failed;
-      }
+      registerManagedShortcut(shortcut);
     });
     sendShortcutsState();
     return { ok: false, error: `快捷键注册失败：${failedKey}`, shortcuts };
@@ -1031,6 +1155,15 @@ const shortcutCallbacks = {
     if (Date.now() < overlayToggleBlockedUntil) return;
     overlayToggleBlockedUntil = Date.now() + 350;
     const nextVisible = !Boolean(lastOverlayState.visible);
+    if (!nextVisible) {
+      const result = overlayPassthroughController.setEnabled(false);
+      if (!result.ok && result.enabled) return;
+      // 关闭恢复失败但已销毁窗口：必须把主窗还给用户，不能只留一条 toast。
+      if (!result.ok && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow._hiddenByOverlay = false;
+        revealMainWindow();
+      }
+    }
     const nextState = {
       ...lastOverlayState,
       initialized: true,
@@ -1066,23 +1199,18 @@ const shortcutCallbacks = {
     overlayWindow.setPosition(nextX, nextY);
     schedulePersistOverlayPosition();
   },
-  focusPrevTab: () => sendFocusTabCommand('prev'),
-  focusNextTab: () => sendFocusTabCommand('next'),
-  overlayPrevQuestion: () => sendOverlayQuestionCommand('prev'),
-  overlayNextQuestion: () => sendOverlayQuestionCommand('next'),
+  focusPrevTab: () => overlayCommands.sendFocusTab('prev'),
+  focusNextTab: () => overlayCommands.sendFocusTab('next'),
+  overlayPrevQuestion: () => overlayCommands.sendQuestion('prev'),
+  overlayNextQuestion: () => overlayCommands.sendQuestion('next'),
+  overlayScrollPrevAnswer: () => overlayCommands.sendScroll('answer', 'up'),
+  overlayScrollNextAnswer: () => overlayCommands.sendScroll('answer', 'down'),
+  overlayScrollPrevQuestion: () => overlayCommands.sendScroll('question', 'up'),
+  overlayScrollNextQuestion: () => overlayCommands.sendScroll('question', 'down'),
+  toggleOverlayPassthrough: () => {
+    overlayPassthroughController.setEnabled(!overlayPassthroughController.isEnabled());
+  },
 };
-
-function sendFocusTabCommand(direction) {
-  if (!isFocusOverlayActive()) return;
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send('focus-tab-command', direction);
-}
-
-function sendOverlayQuestionCommand(direction) {
-  if (!lastOverlayState?.visible) return;
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send('overlay-question-command', direction);
-}
 
 ipcMain.handle('hide-window', () => mainWindow?.hide());
 ipcMain.handle('minimize-window', () => mainWindow?.minimize());
@@ -1095,12 +1223,22 @@ let updateController = null;
 function buildUpdateController() {
   if (updateController) return updateController;
   const downloadsDir = path.join(app.getPath('userData'), 'updates');
+  // SDK 在未打包（npm run dev）或缺少 app-update.yml 时会拒绝检查，控制器随后
+  // 退回 GitHub API + 摘要校验；安装入口始终是本文件里的 launchInstaller。
+  let sdkUpdater = null;
+  try {
+    if (app.isPackaged) sdkUpdater = require('electron-updater').autoUpdater;
+  } catch (error) {
+    // bootstrap 已把 console 换成脱敏出口，SDK logger 与这里共用同一出口。
+    console.warn('update SDK unavailable, falling back to release API', error && error.message);
+  }
   const controller = createUpdateController({
     currentVersion: app.getVersion(),
     downloadsDir,
     apiUrl: UPDATER_UPDATE_URL,
     checkDelayMs: 0,
     timeoutMs: 60000,
+    sdkUpdater,
   });
   controller.onEmit((channel, payload) => {
     const win = mainWindow || overlayWindow;
@@ -1114,8 +1252,7 @@ function buildUpdateController() {
     // 而微任务要等当前同步栈退出才执行，'close' 处理器便会读到 isQuitting === false，
     // 误报「后台服务已停止」。置位提前后两种时序都安全。
     isQuitting = true;
-    gracefulStopPython().then(() => {
-      pythonProcess = null;
+    gracefulStopPython().finally(() => {
       app.quit();
     });
   });
@@ -1219,6 +1356,14 @@ ipcMain.handle('sync-overlay-window', (_event, payload = {}) => {
   const state = { ...lastOverlayState, ...style, enabled: nextEnabled, visible: nextVisible };
   state.initialized = true;
   const visibleChanged = Boolean(lastOverlayState.visible) !== state.visible;
+
+  // 普通 style/state echo 不重置穿透；只有显式隐藏这一生命周期转换才恢复鼠标。
+  if (!state.visible) {
+    const result = overlayPassthroughController.setEnabled(false);
+    if (!result.ok && result.enabled) {
+      return { ok: false, visible: Boolean(lastOverlayState.visible), error: '悬浮窗鼠标恢复失败' };
+    }
+  }
 
   lastOverlayState = state;
   sendOverlayState(state);
@@ -1334,69 +1479,20 @@ function createAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function requestAssistStop(timeoutMs = 12000) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    const req = http.request(`${SERVER_URL}/api/stop`, {
-      method: 'POST',
-      timeout: timeoutMs,
-    }, (res) => {
-      res.resume();
-      res.on('end', finish);
-      res.on('close', finish);
-    });
-    req.on('error', finish);
-    req.on('timeout', () => {
-      try { req.destroy(); } catch (_) { /* ignore */ }
-      finish();
-    });
-    req.end();
-  });
-}
-
-// 优雅停止后端：先主动请求 assist stop，让复盘归档和 SQLite 刷盘完成；
-// 再发 SIGTERM，超时后兜底 SIGKILL。
-let pythonStopPromise = null;
-function gracefulStopPython(timeoutMs = 20000) {
-  if (pythonStopPromise) return pythonStopPromise;
-  const proc = pythonProcess;
-  if (!proc) return Promise.resolve();
-  pythonStopPromise = new Promise((resolve) => {
-    let settled = false;
-    const finish = () => { if (settled) return; settled = true; resolve(); };
-    proc.once('exit', finish);
-    const stopTimeoutMs = Math.max(1000, Math.min(15000, timeoutMs - 5000));
-    requestAssistStop(stopTimeoutMs).then(() => {
-      if (settled) return;
-      try { proc.kill('SIGTERM'); } catch (err) { console.warn('[py] SIGTERM failed:', err.message); }
-      setTimeout(() => {
-        if (settled) return;
-        try {
-          if (!proc.killed) {
-            console.warn('[py] graceful timeout, escalating to SIGKILL');
-            proc.kill('SIGKILL');
-          }
-        } catch (err) {
-          console.warn('[py] SIGKILL failed:', err.message);
-        }
-        finish();
-      }, Math.max(1000, timeoutMs - stopTimeoutMs));
-    });
-  });
-  return pythonStopPromise;
+// 优雅停止托管后端：关闭该 child 的 stdin 触发 EOF，后端自行跑完 lifespan
+// （含 stop_interview_loop 的复盘归档与 SQLite 刷盘）后退出。
+// 不再向端口 POST /api/stop —— 那个端口未必还是我们的后端。
+function gracefulStopPython() {
+  backend.beginShutdown();
+  return backend.shutdown();
 }
 
 app.on('before-quit', (event) => {
   isQuitting = true;
-  if (!pythonProcess || pythonStopPromise) return;
+  overlayPassthroughController.setEnabled(false);
+  if (!backend.getChild()) return;
   event.preventDefault();
-  gracefulStopPython().then(() => {
-    pythonProcess = null;
+  gracefulStopPython().finally(() => {
     app.quit();
   });
 });
@@ -1410,16 +1506,19 @@ app.whenReady().then(async () => {
   createAppMenu();
   // 解析可用端口后再启动后端，避免撞上被保留/占用的端口导致后端起不来。
   PORT = await resolveServerPort(18080, { envPort: process.env.PORT });
+  if (PORT === null) {
+    // 所有候选端口都被占用：不返回假空闲端口，也不去动占用者，直接安全退出。
+    failStartup('all candidate ports are occupied');
+    return;
+  }
   SERVER_URL = `http://127.0.0.1:${PORT}`;
   console.log(`Starting Python backend on port ${PORT}...`);
-  startPythonBackend();
 
   try {
-    await waitForServer();
+    await startPythonBackend();
     console.log('Backend ready, creating window...');
   } catch (err) {
-    console.error('Failed to start backend:', err.message);
-    app.quit();
+    failStartup(err?.message || String(err));
     return;
   }
 
@@ -1466,7 +1565,8 @@ app.on('activate', () => {
 });
 
 app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
+  overlayPassthroughController.setEnabled(false);
+  shortcutRegistry.unregisterAll();
   if (overlayPositionSaveTimer) {
     clearTimeout(overlayPositionSaveTimer);
     overlayPositionSaveTimer = null;
@@ -1475,10 +1575,7 @@ app.on('will-quit', () => {
     overlayWindow.destroy();
     overlayWindow = null;
   }
-  // 兜底:before-quit 通常已经 graceful 停过 pythonProcess,
-  // 这里 fallback 防止异常路径泄漏子进程。
-  if (pythonProcess) {
-    try { pythonProcess.kill('SIGKILL'); } catch (_) { /* ignore */ }
-    pythonProcess = null;
-  }
+  // 兜底:before-quit 通常已经走完 EOF 关闭链，
+  // 这里 fallback 防止异常路径泄漏本进程 spawn 的子进程（只碰捕获的 child）。
+  backend.forceStop();
 });

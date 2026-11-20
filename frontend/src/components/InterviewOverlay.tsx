@@ -139,6 +139,7 @@ export default function InterviewOverlay() {
 
   const overlayAnswerSlice = useMemo(() => sliceMaxLines(answerText, maxLines), [answerText, maxLines])
 
+  const questionScrollRef = useRef<HTMLDivElement | null>(null)
   const answerScrollRef = useRef<HTMLDivElement | null>(null)
   const answerAutoFollowRef = useRef(true)
   const updateAnswerAutoFollow = useCallback(() => {
@@ -150,6 +151,23 @@ export default function InterviewOverlay() {
     if (!el) return
     answerAutoFollowRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 28
   }, [overlayMode, overlayPromptAutoFollow])
+
+  useEffect(() => {
+    return window.electronAPI?.onOverlayScrollCommand?.(({ target, direction }) => {
+      const element = target === 'answer'
+        ? answerScrollRef.current
+        : overlayMode === 'focus' ? questionScrollRef.current : null
+      if (!element) return
+      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+      const step = Math.max(40, element.clientHeight / 3)
+      element.scrollTop = Math.max(
+        0,
+        Math.min(maxScrollTop, element.scrollTop + (direction === 'down' ? step : -step)),
+      )
+      // 手动滚动立即决定后续 chunk 是否吸附：>28px 离底停止跟随，否则沿用既有规则。
+      if (target === 'answer') updateAnswerAutoFollow()
+    })
+  }, [overlayMode, updateAnswerAutoFollow])
 
   useEffect(() => {
     answerAutoFollowRef.current = overlayMode !== 'prompt' || overlayPromptAutoFollow
@@ -461,7 +479,13 @@ export default function InterviewOverlay() {
           {displayedQa && (
             <div className="ov-focus-question-strip" aria-label="题目导航">
               <span>{isReviewingHistory ? '回看' : '当前'} {displayedQaIndex + 1}/{qaPairs.length || 1}</span>
-              <strong>{displayedQa.question}</strong>
+              <div
+                ref={questionScrollRef}
+                className="ov-focus-question-text"
+                title={displayedQa.question}
+              >
+                {displayedQa.question}
+              </div>
               {liveGeneratingQa && (
                 <span className="ov-focus-live-hint" title={liveGeneratingQa.question}>
                   新答案生成中

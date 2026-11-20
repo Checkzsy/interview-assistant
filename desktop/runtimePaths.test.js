@@ -88,12 +88,12 @@ test('resolveServerPort falls back to probing when explicit PORT is unusable', a
   assert.strictEqual(port, 18122)
 })
 
-test('resolveServerPort returns the preferred port when every candidate is unavailable', async () => {
+test('resolveServerPort returns null when every candidate is unavailable instead of a fake free port', async () => {
   const port = await resolveServerPort(18080, {
     envPort: undefined,
     probe: async () => false,
   })
-  assert.strictEqual(port, 18080)
+  assert.strictEqual(port, null)
 })
 
 test('probePort detects a port currently in use and reports it free after release', async () => {

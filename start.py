@@ -2,13 +2,13 @@
 """Unified launcher for the interview assistant."""
 
 import argparse
+import importlib
 import os
 import platform
 import shutil
 import socket
 import subprocess
 import sys
-import time
 from typing import Optional
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +19,11 @@ DESKTOP_DIR = os.path.join(ROOT, "desktop")
 
 REQUIREMENTS = os.path.join(BACKEND_DIR, "requirements.txt")
 HIDE_CONSOLE_ENV = "IA_HIDE_CONSOLE"
+
+try:
+    import uvicorn
+except ImportError:  # pragma: no cover - minimal launcher env without backend deps
+    uvicorn = None
 
 
 # ---------------------------------------------------------------------------
@@ -239,38 +244,27 @@ def ensure_electron():
 # ---------------------------------------------------------------------------
 # Port management
 # ---------------------------------------------------------------------------
+# 绝不按端口/名字去 kill 别的进程：占用端口可能正是用户自己的服务。
+# 这里只做一次独占 bind 探测，失败就带端口号报错，由用户决定怎么处理。
 
-def kill_port(port: int):
-    """Kill any process occupying the given port."""
-    system = platform.system()
-    killed = False
+class PortInUseError(RuntimeError):
+    def __init__(self, host: str, port: int):
+        self.host = host
+        self.port = port
+        super().__init__(f"端口 {port} 已被占用（{host}），请关闭占用该端口的程序或改用其他端口")
+
+
+def ensure_port_free(host: str, port: int):
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        if system == "Windows":
-            result = subprocess.run(
-                ["netstat", "-ano"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace"
-            )
-            for line in result.stdout.splitlines():
-                if f":{port}" in line and "LISTENING" in line:
-                    parts = line.split()
-                    pid = parts[-1]
-                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
-                    print(f"[OK] 已终止占用端口 {port} 的进程 (PID {pid})")
-                    killed = True
-        else:
-            result = subprocess.run(
-                ["lsof", "-ti", f":{port}"],
-                capture_output=True, text=True
-            )
-            for pid in result.stdout.strip().split():
-                if pid:
-                    subprocess.run(["kill", "-9", pid], capture_output=True)
-                    print(f"[OK] 已终止占用端口 {port} 的进程 (PID {pid})")
-                    killed = True
-    except Exception as e:
-        print(f"[WARN] 清理端口 {port} 时出错: {e}")
-    if killed:
-        time.sleep(0.5)
+        if platform.system() == "Windows":
+            # Windows 上 SO_REUSEADDR 允许重复绑定；这里要求独占，才能发现真实占用。
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        probe.bind((host, port))
+    except OSError as exc:
+        raise PortInUseError(host, port) from exc
+    finally:
+        probe.close()
 
 
 # ---------------------------------------------------------------------------
@@ -278,42 +272,45 @@ def kill_port(port: int):
 # ---------------------------------------------------------------------------
 
 def start_server(host: str, port: int):
-    kill_port(port)
+    ensure_port_free(host, port)
+
+    global uvicorn
+    if uvicorn is None:
+        # 延迟导入：只有真正要起服务时才要求后端依赖。
+        if BACKEND_DIR not in sys.path:
+            sys.path.insert(0, BACKEND_DIR)
+        try:
+            uvicorn = importlib.import_module("uvicorn")
+        except ImportError as exc:
+            # 托管模式缺依赖必须直接失败：静默改用 subprocess 会让生命线只连到
+            # 中间 launcher，Electron 的 stdin EOF 就管不到真正的后端进程。
+            print("[ERROR] 缺少 uvicorn 依赖，无法启动后端。")
+            print("  请安装依赖: pip install -r backend/requirements.txt")
+            raise SystemExit(1) from exc
 
     # Add backend to sys.path so all relative imports work correctly
     if BACKEND_DIR not in sys.path:
         sys.path.insert(0, BACKEND_DIR)
     os.chdir(BACKEND_DIR)
 
-    # Try direct import first (fastest, works when deps are in current env)
-    try:
-        import uvicorn
-        _access_log = os.environ.get("IA_ACCESS_LOG", "1").strip().lower() not in ("0", "false", "no")
-        uvicorn.run(
-            "main:app",
-            host=host,
-            port=port,
-            log_level="info",
-            reload=False,
-            access_log=_access_log,
-        )
-        return
-    except ImportError:
-        pass
+    access_log = os.environ.get("IA_ACCESS_LOG", "1").strip().lower() not in ("0", "false", "no")
 
-    # Fallback: subprocess using sys.executable (handles venv / conda / pyenv)
-    print("[INFO] uvicorn 不在当前 Python 路径，尝试通过 subprocess 启动...")
-    uv_args = [
-        sys.executable, "-m", "uvicorn",
+    from core import server_runner
+
+    if server_runner.should_watch_stdin():
+        server_runner.run_managed(host=host, port=port, access_log=access_log)
+        return
+
+    from core.logger import uvicorn_log_config
+    uvicorn.run(
         "main:app",
-        "--host", host,
-        "--port", str(port),
-        "--log-level", "info",
-    ]
-    if os.environ.get("IA_ACCESS_LOG", "1").strip().lower() in ("0", "false", "no"):
-        uv_args.append("--no-access-log")
-    r = subprocess.run(uv_args, cwd=BACKEND_DIR, **_hidden_process_kwargs())
-    sys.exit(r.returncode)
+        host=host,
+        port=port,
+        log_level="info",
+        reload=False,
+        access_log=access_log,
+        log_config=uvicorn_log_config(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -335,10 +332,8 @@ def run_desktop_mode(port: int):
         print(f"    python start.py --mode network")
         sys.exit(1)
 
-    # Pre-clean the port BEFORE Electron launches (Electron spawns
-    # start.py --mode network internally, but if a zombie process holds
-    # the port, it would fail deep inside that chain with a confusing error).
-    kill_port(port)
+    # Electron 自行探测有限候选端口；这里不检查默认端口，避免挡住第二实例揭示旧窗口。
+
 
     # Windows: 如果当前进程还有控制台窗口，先以无窗口模式重启自己
     # 这样用户双击启动时，初始的命令行窗口会消失，只留 Electron 窗口
@@ -377,7 +372,11 @@ def run_network_mode(port: int):
     print()
     _print_access_info(port)
 
-    start_server("0.0.0.0", port)
+    try:
+        start_server("0.0.0.0", port)
+    except PortInUseError as exc:
+        print(f'[ERROR] {exc}')
+        raise SystemExit(1) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +396,12 @@ def main():
     parser.add_argument("--skip-dep-check", action="store_true",
                         help="跳过 Python 依赖检查（已确认环境正确时可加速启动）")
     args = parser.parse_args()
+
+    managed = os.environ.get('IA_MANAGED_BACKEND', '').strip().lower() in ('1', 'true', 'yes')
+    if managed:
+        # 托管 child 只运行服务，不安装依赖、不构建前端，也不再派生中间 launcher。
+        start_server('127.0.0.1', args.port)
+        return
 
     print("=" * 50)
     print("  面试学习助手")

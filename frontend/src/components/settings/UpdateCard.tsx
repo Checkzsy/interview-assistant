@@ -11,7 +11,11 @@ const IDLE_STATE: UpdaterState = {
   publishedAt: null,
   checking: false,
   checkError: null,
-  download: { status: 'idle', received: 0, total: 0, error: null, downloadedPath: null },
+  download: {
+    status: 'idle', received: 0, total: 0, error: null, downloadedPath: null,
+    targetVersion: null, targetId: null,
+  },
+  install: { blocked: false, reason: null },
   installing: false,
   installError: null,
 }
@@ -60,8 +64,13 @@ export default function UpdateCard() {
   if (!window.electronAPI?.getUpdaterState) return null
 
   const busy = state.checking || state.download.status === 'downloading' || state.installing
-  const hasUpdate = state.hasUpdate && !!state.asset && !state.installError
-  const downloadDone = state.download.status === 'done'
+  // 安装失败也要保留“发现新版本”区：否则卡片会改口“已是最新版本”，用户失去重新下载的入口。
+  const hasUpdate = state.hasUpdate && !!state.asset
+  // 只有目标版本一致时，已下载的包才代表当前显示的新版本（避免显示 B 却安装 A）。
+  const verifiedTarget = state.download.status === 'done'
+    && !!state.download.targetVersion
+    && state.download.targetVersion === state.latest
+  const downloadDone = verifiedTarget
 
   const handleCheck = () => {
     window.electronAPI?.checkForUpdate?.().then(setState).catch(() => {})
@@ -96,7 +105,7 @@ export default function UpdateCard() {
               <span className="text-accent-amber text-xs font-semibold">发现新版本 {state.latest}</span>
               <span className="text-[11px] text-text-muted">当前 {state.current}</span>
             </div>
-            {state.download.status !== 'done' ? (
+            {!downloadDone ? (
               <button
                 type="button"
                 disabled={busy}
@@ -116,13 +125,14 @@ export default function UpdateCard() {
                 {state.installing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                 {state.installing
                   ? '正在启动安装…'
-                  : silentInstall
-                    ? '下载完成，静默安装并重启'
-                    : '下载完成，打开安装向导'}
+                  : `安装已下载的 ${state.download.targetVersion}${silentInstall ? '，静默安装并重启' : '，打开安装向导'}`}
               </button>
             )}
             {state.download.status === 'error' && (
               <p className="text-[11px] text-accent-red">{state.download.error}</p>
+            )}
+            {state.install.blocked && state.install.reason && (
+              <p className="text-[11px] text-accent-amber">{state.install.reason}</p>
             )}
             {state.installError && <p className="text-[11px] text-accent-red">{state.installError}</p>}
           </div>

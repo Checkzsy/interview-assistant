@@ -975,13 +975,17 @@ code, pre, .font-mono {
   font-weight: 700;
 }
 
-.ov-focus-question-strip strong {
+.ov-focus-question-text {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-height: 4.5em;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
   color: rgba(31, 41, 55, 0.76);
+  scrollbar-width: thin;
 }
 
 .ov-focus-live-hint {

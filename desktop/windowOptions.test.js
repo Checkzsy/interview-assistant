@@ -85,12 +85,75 @@ test('relayChildOutput prefixes text and never throws on target write failure', 
   };
 
   const dispose = relayChildOutput(childStream, stream, '[py] ');
-  childStream.emit('data', Buffer.from('line 1'));
+  childStream.emit('data', Buffer.from('line 1\n'));
   shouldThrow = true;
-  assert.doesNotThrow(() => childStream.emit('data', 'line 2'));
+  assert.doesNotThrow(() => childStream.emit('data', 'line 2\n'));
   dispose();
   shouldThrow = false;
-  childStream.emit('data', 'line 3');
+  childStream.emit('data', 'line 3\n');
 
-  assert.deepEqual(writes, ['[py] line 1']);
+  assert.deepEqual(writes, ['[py] line 1\n']);
+});
+
+test('relayChildOutput redacts credentials split across chunks using whole-line buffering', () => {
+  const childStream = new EventEmitter();
+  const writes = [];
+  const stream = {
+    writable: true,
+    destroyed: false,
+    write(chunk) {
+      writes.push(chunk);
+      return true;
+    },
+  };
+
+  const dispose = relayChildOutput(childStream, stream, '[py] ');
+  childStream.emit('data', Buffer.from('Authorization: Bearer test-jkjg'));
+  childStream.emit('data', Buffer.from('ff-j4n8u3\nready\n'));
+  dispose();
+
+  assert.deepEqual(writes, ['[py] Authorization: Bearer ***\n', '[py] ready\n']);
+});
+
+test('relayChildOutput splits UTF-8 correctly across chunk boundaries', () => {
+  const childStream = new EventEmitter();
+  const writes = [];
+  const stream = {
+    writable: true,
+    destroyed: false,
+    write(chunk) {
+      writes.push(chunk);
+      return true;
+    },
+  };
+
+  const dispose = relayChildOutput(childStream, stream, '');
+  const bytes = Buffer.from('中文日志\n', 'utf8');
+  childStream.emit('data', bytes.subarray(0, 4)); // 切在「文」中间
+  childStream.emit('data', bytes.subarray(4));
+  dispose();
+
+  assert.deepEqual(writes, ['中文日志\n']);
+});
+
+test('relayChildOutput drops an oversized line entirely and marks the drop', () => {
+  const childStream = new EventEmitter();
+  const writes = [];
+  const stream = {
+    writable: true,
+    destroyed: false,
+    write(chunk) {
+      writes.push(chunk);
+      return true;
+    },
+  };
+
+  const dispose = relayChildOutput(childStream, stream, '[py] ');
+  childStream.emit('data', 'x'.repeat(9000));
+  childStream.emit('data', 'still-same-line\nnext-line\n');
+  dispose();
+
+  assert.equal(writes[0], '[py] [oversized output line dropped]\n', 'half a token must never be flushed');
+  assert.deepEqual(writes.slice(1), ['[py] next-line\n']);
+  assert.ok(!writes.join('').includes('x'.repeat(100)));
 });

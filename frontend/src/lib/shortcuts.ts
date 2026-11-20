@@ -10,6 +10,11 @@ export type ShortcutAction =
   | 'focusNextTab'
   | 'overlayPrevQuestion'
   | 'overlayNextQuestion'
+  | 'overlayScrollPrevAnswer'
+  | 'overlayScrollNextAnswer'
+  | 'overlayScrollPrevQuestion'
+  | 'overlayScrollNextQuestion'
+  | 'toggleOverlayPassthrough'
   | 'askScreenForceThink'
   | 'askScreenForceNoThink'
   | 'toggleThinkMode'
@@ -22,6 +27,7 @@ export type ShortcutConfig = {
   label: string
   category: string
   status?: ShortcutStatus
+  conflict?: ShortcutAction
 }
 
 export const defaultShortcuts: Record<ShortcutAction, ShortcutConfig> = {
@@ -113,6 +119,46 @@ export const defaultShortcuts: Record<ShortcutAction, ShortcutConfig> = {
     category: '悬浮窗',
     status: 'available',
   },
+  overlayScrollPrevAnswer: {
+    action: 'overlayScrollPrevAnswer',
+    key: 'CommandOrControl+Shift+Up',
+    defaultKey: 'CommandOrControl+Shift+Up',
+    label: '答案向上滚动',
+    category: '悬浮窗',
+    status: 'available',
+  },
+  overlayScrollNextAnswer: {
+    action: 'overlayScrollNextAnswer',
+    key: 'CommandOrControl+Shift+Down',
+    defaultKey: 'CommandOrControl+Shift+Down',
+    label: '答案向下滚动',
+    category: '悬浮窗',
+    status: 'available',
+  },
+  overlayScrollPrevQuestion: {
+    action: 'overlayScrollPrevQuestion',
+    key: 'CommandOrControl+Shift+Left',
+    defaultKey: 'CommandOrControl+Shift+Left',
+    label: '题目向上滚动',
+    category: '专注面板',
+    status: 'available',
+  },
+  overlayScrollNextQuestion: {
+    action: 'overlayScrollNextQuestion',
+    key: 'CommandOrControl+Shift+Right',
+    defaultKey: 'CommandOrControl+Shift+Right',
+    label: '题目向下滚动',
+    category: '专注面板',
+    status: 'available',
+  },
+  toggleOverlayPassthrough: {
+    action: 'toggleOverlayPassthrough',
+    key: 'CommandOrControl+1',
+    defaultKey: 'CommandOrControl+1',
+    label: '悬浮窗鼠标穿透',
+    category: '悬浮窗',
+    status: 'available',
+  },
   askScreenForceThink: {
     action: 'askScreenForceThink',
     key: 'CommandOrControl+Alt+/',
@@ -198,23 +244,68 @@ export function getShortcutDisplay(accelerator: string) {
   return out.join(isMacPlatform() ? '' : '+')
 }
 
+const LEGACY_SHORTCUT_ACTIONS = new Set<ShortcutAction>([
+  'hideOrShowWindow',
+  'hardClearSession',
+  'askFromServerScreen',
+  'cancelAnswer',
+  'addMultiServerScreenShot',
+  'toggleInterviewOverlay',
+  'moveOverlayToMouse',
+  'focusPrevTab',
+  'focusNextTab',
+  'overlayPrevQuestion',
+  'overlayNextQuestion',
+  'askScreenForceThink',
+  'askScreenForceNoThink',
+  'toggleThinkMode',
+])
+
 const VALID_ACTIONS = new Set<string>(Object.keys(defaultShortcuts))
 const SUPPORTED_KEY_RE = /^CommandOrControl(\+Shift)?(\+Alt)?\+([A-Za-z0-9./\\\- =;,'`\[\]\{\}]|Enter|Escape|Up|Down|Left|Right)$/
 
 export function mergeShortcutConfigs(
   input: Record<string, Partial<ShortcutConfig> | Record<string, unknown>> | undefined,
 ) {
-  const merged = { ...defaultShortcuts }
+  const merged = Object.fromEntries(
+    Object.entries(defaultShortcuts).map(([action, shortcut]) => [action, { ...shortcut }]),
+  ) as Record<ShortcutAction, ShortcutConfig>
   for (const [action, shortcut] of Object.entries(input || {})) {
     if (!(action in merged)) continue
     if (!shortcut || typeof shortcut !== 'object') continue
     const s = shortcut as Record<string, unknown>
-    if (typeof s.key === 'string' && s.key.trim() && SUPPORTED_KEY_RE.test(s.key)) {
-      merged[action as ShortcutAction] = {
-        ...merged[action as ShortcutAction],
-        key: s.key,
+    if (!(typeof s.key === 'string' && s.key.trim() && SUPPORTED_KEY_RE.test(s.key))) continue
+    const next: ShortcutConfig = {
+      ...merged[action as ShortcutAction],
+      key: s.key as string,
+    }
+    // 只接受合法原生状态：注册结果以主进程为准，非法值一律回落到默认。
+    if (s.status === 'registered' || s.status === 'failed' || s.status === 'available') {
+      next.status = s.status
+    }
+    if (s.status === 'failed' && typeof s.conflict === 'string' && s.conflict !== action
+      && Object.prototype.hasOwnProperty.call(merged, s.conflict)) {
+      next.conflict = s.conflict as ShortcutAction
+    }
+    merged[action as ShortcutAction] = next
+  }
+
+  const conflicts = new Map<ShortcutAction, ShortcutAction>()
+  for (const [action, shortcut] of Object.entries(merged) as [ShortcutAction, ShortcutConfig][]) {
+    for (const [otherAction, other] of Object.entries(merged) as [ShortcutAction, ShortcutConfig][]) {
+      if (action === otherAction || shortcut.key !== other.key) continue
+      const actionIsLegacy = LEGACY_SHORTCUT_ACTIONS.has(action)
+      const otherIsLegacy = LEGACY_SHORTCUT_ACTIONS.has(otherAction)
+      if (actionIsLegacy && !otherIsLegacy) {
+        conflicts.set(otherAction, action)
+      } else if (actionIsLegacy === otherIsLegacy && Object.keys(merged).indexOf(action) > Object.keys(merged).indexOf(otherAction)) {
+        conflicts.set(action, otherAction)
       }
     }
+  }
+
+  for (const [action, conflictingAction] of conflicts) {
+    merged[action] = { ...merged[action], status: 'failed', conflict: conflictingAction } as ShortcutConfig
   }
   return merged
 }
