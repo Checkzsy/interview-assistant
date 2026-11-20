@@ -69,6 +69,18 @@ describe('PreferencesTab', () => {
     })
   })
 
+  it('documents overlay passthrough and scroll shortcuts in the overlay hint', () => {
+    useUiPrefsStore.setState({ interviewOverlayEnabled: true })
+    render(<PreferencesTab />)
+
+    fireEvent.click(screen.getByText('工作模式'))
+
+    const hint = screen.getByText(/悬浮窗不会抢占焦点/).closest('p')
+    expect(hint).toHaveTextContent('滚动答案')
+    expect(hint).toHaveTextContent('滚动题目（仅专注面板）')
+    expect(hint).toHaveTextContent('切换鼠标穿透')
+  })
+
   it('saves answer length choices immediately from common preferences', async () => {
     render(<PreferencesTab />)
 
