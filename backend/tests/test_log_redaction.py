@@ -54,6 +54,7 @@ def isolated_logging(monkeypatch, tmp_path):
     logging.getLogger().handlers = [logging.NullHandler()]
     for logger in managed[1:]:
         logger.handlers = []
+        logger.filters = []
 
     yield tmp_path
 
@@ -158,6 +159,26 @@ def test_uvicorn_log_config_wraps_factories_and_survives_dict_config(isolated_lo
     assert isinstance(default_handler.formatter.formatter, uvicorn.logging.DefaultFormatter)
     assert isinstance(access_handler, app_logger.RedactingStreamHandler)
     assert isinstance(access_handler.formatter.formatter, uvicorn.logging.AccessFormatter)
+
+
+def test_uvicorn_log_config_survives_python311_dict_config(monkeypatch, isolated_logging):
+    """Python 3.11 resolves handler "class" via str.split(); class objects need 3.12+."""
+    original = logging.config.DictConfigurator.configure_handler
+
+    def python311_configure_handler(self, config):
+        cname = config.get("class")
+        if cname is not None and not isinstance(cname, str):
+            raise AttributeError(f"type object {cname!r} has no attribute 'split'")
+        return original(self, config)
+
+    monkeypatch.setattr(
+        logging.config.DictConfigurator, "configure_handler", python311_configure_handler
+    )
+    logging.config.dictConfig(app_logger.uvicorn_log_config())
+
+    assert isinstance(
+        logging.getLogger("uvicorn.access").handlers[0], app_logger.RedactingStreamHandler
+    )
 
 
 def test_uvicorn_log_config_redacts_real_stdout_and_stderr(monkeypatch, isolated_logging):

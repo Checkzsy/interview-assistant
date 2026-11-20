@@ -90,8 +90,11 @@ def uvicorn_log_config() -> dict:
     config = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
     config["formatters"]["default"]["()"] = _redacting_default_formatter
     config["formatters"]["access"]["()"] = _redacting_access_formatter
-    config["handlers"]["default"]["class"] = RedactingStreamHandler
-    config["handlers"]["access"]["class"] = RedactingStreamHandler
+    for name in ("default", "access"):
+        handler = config["handlers"][name]
+        handler.pop("class", None)
+        # dictConfig 只在 3.12+ 接受 "class" 为类对象；"()" 工厂从 3.2 起可用。
+        handler["()"] = RedactingStreamHandler
     return config
 
 
